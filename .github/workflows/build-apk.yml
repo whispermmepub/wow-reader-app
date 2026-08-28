@@ -41,13 +41,18 @@ jobs:
           test -s app/src/main/java/com/whisper/wowreader/EpubUtil.java
           test -s app/src/main/java/com/whisper/wowreader/PageCurlView.java
           test -s app/src/main/java/com/whisper/wowreader/ReaderAnnotationStore.java
+          test -s app/src/main/java/com/whisper/wowreader/ReaderFontStore.java
           test -s app/src/main/java/com/whisper/wowreader/SplashActivity.java
           test -s app/src/main/res/drawable/wow_logo.webp
           test -s app/src/main/assets/fonts/pyidaungsu.woff2
           test -s app/src/main/assets/fonts/yoeshin.woff2
           test -s app/src/main/assets/fonts/burma2.woff2
-          grep -q "versionCode 15" app/build.gradle
-          grep -q "versionName '2.3.0'" app/build.gradle
+          test -s app/src/main/assets/fonts/burma001.ttf
+          test -s app/src/main/assets/fonts/m01_pupu_bold.ttf
+          test -s app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
+          test -s app/src/main/assets/fonts/phantee_hand_written.ttf
+          grep -q "versionCode 16" app/build.gradle
+          grep -q "versionName '2.4.0'" app/build.gradle
           ! grep -q "play-services-auth" app/build.gradle
           ! test -e app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           grep -q "https://t.me/TheBookR" app/src/main/java/com/whisper/wowreader/MainActivity.java
@@ -55,6 +60,14 @@ jobs:
           grep -q "https://whispermmepub.github.io/Review/" app/src/main/java/com/whisper/wowreader/MainActivity.java
           grep -q "ReaderAnnotationStore.add" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q "installSelectionWatcher" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "REQ_IMPORT_FONT" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "Import custom font" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "custom:" app/src/main/java/com/whisper/wowreader/ReaderFontStore.java
+          grep -q "MAX_FONT_BYTES" app/src/main/java/com/whisper/wowreader/ReaderFontStore.java
+          grep -q "MESH_W = 48" app/src/main/java/com/whisper/wowreader/PageCurlView.java
+          grep -q "backsidePaint" app/src/main/java/com/whisper/wowreader/PageCurlView.java
+          grep -q "drawFoldLighting" app/src/main/java/com/whisper/wowreader/PageCurlView.java
+          grep -q "setDuration(430L)" app/src/main/java/com/whisper/wowreader/PageCurlView.java
 
       - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
@@ -70,14 +83,14 @@ jobs:
           test -s "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='15'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.3.0'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='16'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.4.0'"
           "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
 
       - name: Collect APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.3.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.4.0-unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
@@ -85,9 +98,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.3.0
+          name: WoW-Reader-v2.4.0
           path: |
-            WoW-Reader-v2.3.0-unsigned.apk
+            WoW-Reader-v2.4.0-unsigned.apk
             apksigner.jar
           if-no-files-found: error
           retention-days: 14
