@@ -3,7 +3,7 @@
 **WoW Reader** is an offline EPUB/PDF reader for the Whisper Of Words community.
 
 ## Current release
-- Version: **2.3.0**
+- Version: **2.4.0**
 - Android package: `com.whisper.wowreader`
 - Minimum Android: 6.0 (API 23)
 - Target SDK: 35
@@ -12,7 +12,8 @@
 - EPUB and PDF offline reading
 - Page-by-page and vertical scroll modes
 - Myanmar smart justify / spacing adjustment
-- Publisher font plus Pyidaungsu, A10 YoeShin and Burma2
+- Publisher font plus Pyidaungsu, A10 YoeShin, Burma2, Burma001, M01 PuPu, Myanmar Ayar and Phantee
+- Import your own TTF, OTF, WOFF or WOFF2 reader fonts
 - EPUB NAV/NCX table of contents with auxiliary-page filtering
 - Bookmarks, highlights and notes
 - Selected-text Translate shortcut for Myanmar / English

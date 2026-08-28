@@ -76,6 +76,7 @@ public class BookReaderActivity extends Activity {
     private static final int SEL_NOTE = 9302;
     private static final int SEL_TRANSLATE = 9303;
     private static final int SEL_COPY = 9304;
+    private static final int REQ_IMPORT_FONT = 9401;
     private boolean controlsVisible = false;
 
     private WebView webView;
@@ -1087,6 +1088,25 @@ public class BookReaderActivity extends Activity {
             familyCss = "body,body *{font-family:'WoWYoeShin',sans-serif !important;}";
         else if ("burma2".equals(fontChoice))
             familyCss = "body,body *{font-family:'WoWBurma2',sans-serif !important;}";
+        else if ("burma001".equals(fontChoice))
+            familyCss = "body,body *{font-family:'WoWBurma001',sans-serif !important;}";
+        else if ("pupu".equals(fontChoice))
+            familyCss = "body,body *{font-family:'WoWPuPu',sans-serif !important;}";
+        else if ("ayar".equals(fontChoice))
+            familyCss = "body,body *{font-family:'WoWMyanmarAyar',sans-serif !important;}";
+        else if ("phantee".equals(fontChoice))
+            familyCss = "body,body *{font-family:'WoWPhantee',sans-serif !important;}";
+        else if (fontChoice != null && fontChoice.startsWith("custom:")) {
+            File customFont = ReaderFontStore.fileForChoice(this, fontChoice);
+            if (customFont != null) {
+                String customUrl = Uri.fromFile(customFont).toString().replace("'", "%27");
+                familyCss = "@font-face{font-family:'WoWCustom';src:url('" + customUrl + "') format('" +
+                        ReaderFontStore.cssFormat(customFont) + "');font-display:block;}" +
+                        "body,body *{font-family:'WoWCustom',sans-serif !important;}";
+            } else {
+                fontChoice = "publisher";
+            }
+        }
 
         int restore = restoreProgress ? currentProgressPermille : -1;
         double ratio = restore >= 0 ? restore / 1000.0 : 0.0;
@@ -1099,9 +1119,13 @@ public class BookReaderActivity extends Activity {
                 : "";
 
         String commonCss =
-                "@font-face{font-family:'WoWPyidaungsu';src:url('file:///android_asset/fonts/pyidaungsu.woff2') format('woff2');}" +
-                "@font-face{font-family:'WoWYoeShin';src:url('file:///android_asset/fonts/yoeshin.woff2') format('woff2');}" +
-                "@font-face{font-family:'WoWBurma2';src:url('file:///android_asset/fonts/burma2.woff2') format('woff2');}" +
+                "@font-face{font-family:'WoWPyidaungsu';src:url('file:///android_asset/fonts/pyidaungsu.woff2') format('woff2');font-display:block;}" +
+                "@font-face{font-family:'WoWYoeShin';src:url('file:///android_asset/fonts/yoeshin.woff2') format('woff2');font-display:block;}" +
+                "@font-face{font-family:'WoWBurma2';src:url('file:///android_asset/fonts/burma2.woff2') format('woff2');font-display:block;}" +
+                "@font-face{font-family:'WoWBurma001';src:url('file:///android_asset/fonts/burma001.ttf') format('truetype');font-display:block;}" +
+                "@font-face{font-family:'WoWPuPu';src:url('file:///android_asset/fonts/m01_pupu_bold.ttf') format('truetype');font-display:block;}" +
+                "@font-face{font-family:'WoWMyanmarAyar';src:url('file:///android_asset/fonts/myanmar_ayar_typewriter.ttf') format('truetype');font-display:block;}" +
+                "@font-face{font-family:'WoWPhantee';src:url('file:///android_asset/fonts/phantee_hand_written.ttf') format('truetype');font-display:block;}" +
                 "html,body{background:" + bg + " !important;color:" + fg + " !important;}" +
                 "a{color:" + link + " !important;}" +
                 "pre{white-space:pre-wrap !important;overflow-wrap:anywhere !important;}" +
@@ -1584,7 +1608,7 @@ public class BookReaderActivity extends Activity {
     }
 
     private void showPageAnimationDialog() {
-        String[] labels = {"Paper · default", "Smooth slide", "None"};
+        String[] labels = {"Natural paper · default", "Smooth slide", "None"};
         String[] values = {"paper", "slide", "none"};
         int selected = "slide".equals(pageAnimation) ? 1 : ("none".equals(pageAnimation) ? 2 : 0);
         new AlertDialog.Builder(this)
@@ -1663,28 +1687,111 @@ public class BookReaderActivity extends Activity {
     }
 
     private void showFontDialog() {
-        String[] fonts = {
-                "Publisher font (EPUB original)",
-                "Pyidaungsu",
-                "A10 YoeShin",
-                "Burma2"
-        };
-        String[] ids = {"publisher", "pyidaungsu", "yoeshin", "burma2"};
+        List<ReaderFontStore.FontEntry> custom = ReaderFontStore.list(this);
+        List<String> labels = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
 
-        int selected = 0;
-        for (int i = 0; i < ids.length; i++)
-            if (ids[i].equals(fontChoice)) selected = i;
+        labels.add("Publisher font (EPUB original)"); ids.add("publisher");
+        labels.add("Pyidaungsu"); ids.add("pyidaungsu");
+        labels.add("A10 YoeShin"); ids.add("yoeshin");
+        labels.add("Burma2"); ids.add("burma2");
+        labels.add("Burma001"); ids.add("burma001");
+        labels.add("M01 PuPu Bold"); ids.add("pupu");
+        labels.add("Myanmar Ayar Typewriter"); ids.add("ayar");
+        labels.add("Phantee Hand Written"); ids.add("phantee");
+
+        for (ReaderFontStore.FontEntry f : custom) {
+            labels.add("My font · " + f.label);
+            ids.add(f.id);
+        }
+        labels.add("＋ Import custom font…"); ids.add("__import__");
+        if (!custom.isEmpty()) {
+            labels.add("Manage custom fonts…"); ids.add("__manage__");
+        }
+
+        int selected = -1;
+        for (int i = 0; i < ids.size(); i++) if (ids.get(i).equals(fontChoice)) selected = i;
 
         new AlertDialog.Builder(this)
                 .setTitle("Font")
-                .setSingleChoiceItems(fonts, selected, (dialog, which) -> {
-                    fontChoice = ids[which];
-                    saveReaderPreferences();
-                    applyReaderStyle(true);
+                .setSingleChoiceItems(labels.toArray(new String[0]), selected, (dialog, which) -> {
+                    String id = ids.get(which);
                     dialog.dismiss();
+                    if ("__import__".equals(id)) pickCustomFont();
+                    else if ("__manage__".equals(id)) showManageCustomFonts();
+                    else {
+                        fontChoice = id;
+                        saveReaderPreferences();
+                        applyReaderStyle(true);
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void pickCustomFont() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("*/*");
+        pick.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "font/ttf", "font/otf", "font/woff", "font/woff2",
+                "application/x-font-ttf", "application/x-font-opentype",
+                "application/font-woff", "application/octet-stream"
+        });
+        try {
+            startActivityForResult(pick, REQ_IMPORT_FONT);
+        } catch (Exception e) {
+            Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showManageCustomFonts() {
+        List<ReaderFontStore.FontEntry> fonts = ReaderFontStore.list(this);
+        if (fonts.isEmpty()) {
+            Toast.makeText(this, "No custom fonts imported", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[fonts.size()];
+        for (int i = 0; i < fonts.size(); i++) labels[i] = fonts.get(i).label;
+        new AlertDialog.Builder(this)
+                .setTitle("Custom fonts · tap to remove")
+                .setItems(labels, (dialog, which) -> {
+                    ReaderFontStore.FontEntry target = fonts.get(which);
+                    new AlertDialog.Builder(this)
+                            .setTitle("Remove font?")
+                            .setMessage(target.label)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Remove", (d, w) -> {
+                                boolean wasSelected = target.id.equals(fontChoice);
+                                if (ReaderFontStore.delete(this, target.id)) {
+                                    if (wasSelected) {
+                                        fontChoice = "publisher";
+                                        saveReaderPreferences();
+                                        applyReaderStyle(true);
+                                    }
+                                    Toast.makeText(this, "Font removed", Toast.LENGTH_SHORT).show();
+                                }
+                            }).show();
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_IMPORT_FONT || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) return;
+        try {
+            ReaderFontStore.FontEntry imported = ReaderFontStore.importFont(this, uri);
+            fontChoice = imported.id;
+            saveReaderPreferences();
+            applyReaderStyle(true);
+            Toast.makeText(this, "Font added · " + imported.label, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Font import failed · " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showLineSpacingDialog() {
@@ -1809,7 +1916,7 @@ public class BookReaderActivity extends Activity {
     private String pageAnimationDisplayName() {
         if ("slide".equals(pageAnimation)) return "Slide";
         if ("none".equals(pageAnimation)) return "None";
-        return "Paper";
+        return "Natural paper";
     }
 
     private String alignmentDisplayName() {
@@ -1822,6 +1929,14 @@ public class BookReaderActivity extends Activity {
         if ("pyidaungsu".equals(fontChoice)) return "Pyidaungsu";
         if ("yoeshin".equals(fontChoice)) return "A10 YoeShin";
         if ("burma2".equals(fontChoice)) return "Burma2";
+        if ("burma001".equals(fontChoice)) return "Burma001";
+        if ("pupu".equals(fontChoice)) return "M01 PuPu Bold";
+        if ("ayar".equals(fontChoice)) return "Myanmar Ayar Typewriter";
+        if ("phantee".equals(fontChoice)) return "Phantee Hand Written";
+        if (fontChoice != null && fontChoice.startsWith("custom:")) {
+            String name = ReaderFontStore.displayNameForChoice(this, fontChoice);
+            if (name != null) return name;
+        }
         return "Publisher";
     }
 
