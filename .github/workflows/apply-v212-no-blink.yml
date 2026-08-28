@@ -1,0 +1,49 @@
+name: Apply WoW Reader v2.12 No Blink
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/patch_v212_no_blink.py'
+      - '.github/workflows/apply-v212-no-blink.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply no-blink reflow
+        run: python3 tools/patch_v212_no_blink.py
+
+      - name: Validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          R=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'readerStyleOverlay' "$R"
+          grep -q 'applyReaderStyleSmooth' "$R"
+          grep -q 'finishReaderStyleReflow' "$R"
+          grep -q 'onStyleReady' "$R"
+          grep -q 'document.fonts.ready' "$R"
+          grep -q 'wow-reader-block{line-height:' "$R"
+          ! grep -q '"3D page curl"' "$R"
+          git diff --check
+
+      - name: Commit no-blink reflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Remove reader blink during typography reflow'
+          git push origin HEAD:main
