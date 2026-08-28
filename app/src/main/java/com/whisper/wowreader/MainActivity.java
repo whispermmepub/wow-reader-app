@@ -121,6 +121,12 @@ public class MainActivity extends Activity {
         libraryAdapter = new LibraryAdapter();
         configureLibraryLayout();
         libraryRecycler.setAdapter(libraryAdapter);
+        libraryRecycler.addOnLayoutChangeListener((v, left, top, right, bottom,
+                                                   oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left;
+            if (width > 0 && width != oldRight - oldLeft)
+                libraryRecycler.post(() -> updateLibraryColumnsForWidth(width));
+        });
         root.addView(libraryRecycler, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -539,15 +545,25 @@ public class MainActivity extends Activity {
 
 
 
+    private int calculateLibraryColumns(int widthPx) {
+        if (!gridMode) return 1;
+        float density = Math.max(1f, getResources().getDisplayMetrics().density);
+        float widthDp = Math.max(1f, widthPx / density);
+        // Keep covers at a comfortable book-like size while using all available space.
+        // This naturally produces 2 columns on phones and 3–6 on tablets/foldables/landscape.
+        final float sideDp = 28f;
+        final float gapDp = 12f;
+        final float minCardDp = 154f;
+        float usable = Math.max(minCardDp, widthDp - sideDp);
+        int columns = (int) Math.floor((usable + gapDp) / (minCardDp + gapDp));
+        return Math.max(2, Math.min(6, columns));
+    }
+
     private void configureLibraryLayout() {
         if (libraryRecycler == null) return;
-        int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels /
-                Math.max(1f, getResources().getDisplayMetrics().density));
-        if (!gridMode) libraryColumns = 1;
-        else if (widthDp >= 900) libraryColumns = 5;
-        else if (widthDp >= 680) libraryColumns = 4;
-        else if (widthDp >= 430) libraryColumns = 3;
-        else libraryColumns = 2;
+        int width = libraryRecycler.getWidth() > 0
+                ? libraryRecycler.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        libraryColumns = calculateLibraryColumns(width);
 
         GridLayoutManager layout = new GridLayoutManager(this, libraryColumns);
         layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
@@ -560,8 +576,26 @@ public class MainActivity extends Activity {
         libraryRecycler.setLayoutManager(layout);
     }
 
+    private void updateLibraryColumnsForWidth(int widthPx) {
+        if (libraryRecycler == null || widthPx <= 0) return;
+        int wanted = calculateLibraryColumns(widthPx);
+        if (wanted == libraryColumns) return;
+        libraryColumns = wanted;
+        GridLayoutManager layout = new GridLayoutManager(this, libraryColumns);
+        layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override public int getSpanSize(int position) {
+                if (position <= 1) return libraryColumns;
+                if (visibleBooks.isEmpty() && position == 2) return libraryColumns;
+                return 1;
+            }
+        });
+        libraryRecycler.setLayoutManager(layout);
+        if (libraryAdapter != null) libraryAdapter.notifyDataSetChanged();
+    }
+
     private int libraryCardWidth() {
-        int screen = getResources().getDisplayMetrics().widthPixels;
+        int screen = libraryRecycler != null && libraryRecycler.getWidth() > 0
+                ? libraryRecycler.getWidth() : getResources().getDisplayMetrics().widthPixels;
         int gap = dp(12);
         int side = dp(14);
         int columns = Math.max(1, libraryColumns);

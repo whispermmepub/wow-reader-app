@@ -331,6 +331,7 @@ public class BookReaderActivity extends Activity {
             if (annotationButton != null) annotationButton.setVisibility(View.GONE);
         }
 
+        installReaderSafeAreaHandling();
         setContentView(root);
         updateChromeTheme();
         updateAnnotationButton();
@@ -2552,14 +2553,77 @@ public class BookReaderActivity extends Activity {
         enterImmersive();
     }
 
+    private void installReaderSafeAreaHandling() {
+        if (root == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attrs);
+
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                int safeTop = cutout == null ? 0 : cutout.getSafeInsetTop();
+                int safeBottom = cutout == null ? 0 : cutout.getSafeInsetBottom();
+                if (topBar != null) {
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) topBar.getLayoutParams();
+                    int wanted = safeTop + dp(8);
+                    if (p.topMargin != wanted) { p.topMargin = wanted; topBar.setLayoutParams(p); }
+                }
+                if (bottomBar != null) {
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) bottomBar.getLayoutParams();
+                    int wanted = safeBottom + dp(12);
+                    if (p.bottomMargin != wanted) { p.bottomMargin = wanted; bottomBar.setLayoutParams(p); }
+                }
+                return insets;
+            });
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        View decor = getWindow().getDecorView();
+        decor.postDelayed(this::enterImmersive, 80L);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) getWindow().getDecorView().postDelayed(this::enterImmersive, 55L);
+    }
+
     private void enterImmersive() {
-        getWindow().getDecorView().setSystemUiVisibility(
+        Window window = getWindow();
+        View decor = window.getDecorView();
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+
+        // Keep the content laid out edge-to-edge on every supported Android version.
+        decor.setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
                 View.SYSTEM_UI_FLAG_FULLSCREEN);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(android.view.WindowInsets.Type.statusBars() |
+                        android.view.WindowInsets.Type.navigationBars());
+            }
+        }
     }
 
     private void updateChromeTheme() {
