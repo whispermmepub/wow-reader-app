@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'tools/patch_v212_api23.py'
+      - 'tools/patch_v212_lint.py'
       - '.github/workflows/apply-v212.yml'
   workflow_dispatch:
 
@@ -19,29 +19,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply API 23 compatibility fix
-        run: python3 tools/patch_v212_api23.py
-      - name: Validate v2.12 source
+      - name: Apply author lint compatibility fix
+        run: python3 tools/patch_v212_lint.py
+      - name: Validate source
         shell: bash
         run: |
           set -euo pipefail
           MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
-          READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
-          DRIVE=app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           grep -q 'versionCode 24' app/build.gradle
           grep -q "versionName '2.12.0'" app/build.gradle
-          grep -q 'play-services-auth:21.4.0' app/build.gradle
-          grep -q 'showAuthorsDialog' "$MAIN"
-          grep -q 'showAccountMenu' "$MAIN"
-          grep -q 'performGoogleBackup' "$MAIN"
-          grep -q 'performGoogleRestore' "$MAIN"
-          grep -q 'maybeAutoGoogleSync' "$MAIN"
-          grep -q 'library_author_' "$MAIN"
-          grep -q 'sync_updated_ms' "$READER"
-          grep -q 'DRIVE_APPFOLDER' "$DRIVE"
-          grep -q 'appDataFolder' "$DRIVE"
-          grep -q 'BackupCheckCallback' "$DRIVE"
-          ! grep -q 'java.util.function.Consumer' "$DRIVE"
+          grep -q 'play-services-auth:21.5.0' app/build.gradle
+          grep -q 'Integer oldCount = counts.get(author)' "$MAIN"
+          ! grep -q 'counts.getOrDefault' "$MAIN"
           git diff --check
       - name: Commit compatibility fix
         shell: bash
@@ -49,7 +38,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          git add app/src/main/java/com/whisper/wowreader/MainActivity.java
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Make Google backup check compatible with Android 6'
+          git commit -m 'Make author shelves compatible with Android 6'
           git push origin HEAD:main
