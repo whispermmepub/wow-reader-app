@@ -71,6 +71,8 @@ jobs:
           grep -q "cachedLibraryAuthor" "$MAIN"
           grep -q "showAuthorsDialog" "$MAIN"
           grep -q "library_author_" "$MAIN"
+          grep -q "Integer oldCount = counts.get(author)" "$MAIN"
+          ! grep -q "counts.getOrDefault" "$MAIN"
           grep -q "showAccountMenu" "$MAIN"
           grep -q "performGoogleBackup" "$MAIN"
           grep -q "performGoogleRestore" "$MAIN"
