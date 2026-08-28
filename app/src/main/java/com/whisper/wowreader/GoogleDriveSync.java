@@ -67,6 +67,10 @@ final class GoogleDriveSync {
         void onError(String message);
     }
 
+    interface BackupCheckCallback {
+        void onResult(boolean found);
+    }
+
     private final Activity activity;
     private final AuthorizationClient authorizationClient;
     private AuthCallback pendingAuthCallback;
@@ -217,12 +221,12 @@ final class GoogleDriveSync {
         }, "wow-google-restore").start();
     }
 
-    static void hasBackup(Activity activity, String token, java.util.function.Consumer<Boolean> callback) {
+    static void hasBackup(Activity activity, String token, BackupCheckCallback callback) {
         new Thread(() -> {
             boolean found = false;
             try { found = findBackupId(token) != null; } catch (Exception ignored) {}
             final boolean value = found;
-            activity.runOnUiThread(() -> callback.accept(value));
+            activity.runOnUiThread(() -> callback.onResult(value));
         }, "wow-google-backup-check").start();
     }
 
