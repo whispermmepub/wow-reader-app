@@ -87,6 +87,11 @@ public class BookReaderActivity extends Activity {
     private static final int REQ_IMPORT_FONT = 9401;
     private boolean controlsVisible = false;
     private FrameLayout readerLoadingOverlay;
+    private ImageView readerStyleOverlay;
+    private Bitmap readerStyleBitmap;
+    private boolean readerStyleReflowPending = false;
+    private int readerStyleReflowToken = 0;
+    private Runnable readerStyleApplyRunnable;
 
     private WebView webView;
     private PageCurlView pageCurlView;
@@ -571,6 +576,15 @@ public class BookReaderActivity extends Activity {
         chapterTransitionOverlay.setVisibility(View.GONE);
         chapterTransitionOverlay.setClickable(false);
         content.addView(chapterTransitionOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        readerStyleOverlay = new ImageView(this);
+        readerStyleOverlay.setScaleType(ImageView.ScaleType.FIT_XY);
+        readerStyleOverlay.setVisibility(View.GONE);
+        readerStyleOverlay.setClickable(false);
+        readerStyleOverlay.setFocusable(false);
+        content.addView(readerStyleOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -1246,7 +1260,71 @@ public class BookReaderActivity extends Activity {
         }
     }
 
+    private void applyReaderStyleSmooth(boolean restoreProgress) {
+        if (webView == null || isPdf) {
+            applyReaderStyle(restoreProgress);
+            return;
+        }
+        if (chapterLoading || webView.getWidth() <= 0 || webView.getHeight() <= 0) {
+            applyReaderStyle(restoreProgress);
+            return;
+        }
+
+        final int token = ++readerStyleReflowToken;
+        readerStyleReflowPending = true;
+        if (readerStyleApplyRunnable != null) webView.removeCallbacks(readerStyleApplyRunnable);
+
+        if (readerStyleOverlay != null && readerStyleOverlay.getVisibility() != View.VISIBLE) {
+            Bitmap shot = captureWebViewBitmap();
+            if (shot != null) {
+                if (readerStyleBitmap != null && !readerStyleBitmap.isRecycled()) readerStyleBitmap.recycle();
+                readerStyleBitmap = shot;
+                readerStyleOverlay.animate().cancel();
+                readerStyleOverlay.setImageBitmap(shot);
+                readerStyleOverlay.setAlpha(1f);
+                readerStyleOverlay.setVisibility(View.VISIBLE);
+                readerStyleOverlay.bringToFront();
+            }
+        }
+
+        if ("page".equals(readingMode)) pageTurnLocked = true;
+        readerStyleApplyRunnable = () -> {
+            if (token != readerStyleReflowToken || webView == null) return;
+            readerStyleApplyRunnable = null;
+            applyReaderStyle(restoreProgress, token);
+        };
+        webView.postDelayed(readerStyleApplyRunnable, 72L);
+    }
+
+    private void finishReaderStyleReflow(int token) {
+        if (!readerStyleReflowPending || token != readerStyleReflowToken) return;
+        readerStyleReflowPending = false;
+        readerStyleApplyRunnable = null;
+        if (!chapterLoading) pageTurnLocked = false;
+        if (readerStyleOverlay == null || readerStyleOverlay.getVisibility() != View.VISIBLE) {
+            if (readerStyleBitmap != null && !readerStyleBitmap.isRecycled()) readerStyleBitmap.recycle();
+            readerStyleBitmap = null;
+            return;
+        }
+        readerStyleOverlay.animate().cancel();
+        readerStyleOverlay.animate().alpha(0f).setDuration(145L)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f))
+                .withEndAction(() -> {
+                    if (readerStyleOverlay != null) {
+                        readerStyleOverlay.setVisibility(View.GONE);
+                        readerStyleOverlay.setImageDrawable(null);
+                        readerStyleOverlay.setAlpha(1f);
+                    }
+                    if (readerStyleBitmap != null && !readerStyleBitmap.isRecycled()) readerStyleBitmap.recycle();
+                    readerStyleBitmap = null;
+                }).start();
+    }
+
     private void applyReaderStyle(boolean restoreProgress) {
+        applyReaderStyle(restoreProgress, 0);
+    }
+
+    private void applyReaderStyle(boolean restoreProgress, int styleToken) {
         if (webView == null) return;
 
         String bg = readerTheme == 2 ? "#121212" :
@@ -1387,7 +1465,9 @@ public class BookReaderActivity extends Activity {
                     "var sig=(viewport.clientWidth||0)+'x'+(viewport.clientHeight||0)+'|'+Math.round(flow.scrollWidth||0)+'|'+map.join(',');if(sig===lastSig)stableHits++;else{lastSig=sig;stableHits=0;}attempt++;" +
                     "if(stableHits<1&&attempt<7){setTimeout(run,76);return;}st.pageMap=map;st.count=map.length;st.page=st.clamp(Math.round((st.count-1)*ratio),0,st.count-1);st.apply(false);" +
                     "requestAnimationFrame(function(){if(epoch!==st.measureEpoch)return;var verify=st.collectPageMap();var sig2=(viewport.clientWidth||0)+'x'+(viewport.clientHeight||0)+'|'+Math.round(flow.scrollWidth||0)+'|'+verify.join(',');" +
-                    "if(sig2!==sig&&attempt<9){lastSig=sig2;stableHits=0;setTimeout(run,64);return;}st.locked=false;st.report();WoW.onPageReady(" + styleGeneration + ",st.page+1,st.count,st.progress());});});});};run();};" +
+                    "if(sig2!==sig&&attempt<9){lastSig=sig2;stableHits=0;setTimeout(run,64);return;}st.locked=false;st.report();WoW.onPageReady(" + styleGeneration + ",st.page+1,st.count,st.progress());" +
+                    (styleToken > 0 ? "WoW.onStyleReady(" + styleToken + ");" : "") +
+                    "});});});};run();};" +
                     "st.turn=function(d){if(st.mode!=='page'||st.locked)return 'locked';if(d<0&&(st.page||0)<=0){st.locked=true;WoW.requestChapter(-1);return 'chapter';}if(d>0&&(st.page||0)>=(st.count||1)-1){st.locked=true;WoW.requestChapter(1);return 'chapter';}st.locked=true;st.page=st.clamp((st.page||0)+d,0,(st.count||1)-1);st.paperTurn(d,function(){st.report();st.locked=false;WoW.onPageTurnComplete(st.page+1,st.count,st.progress());});return 'page';};" +
                     "if(!st.resizeBound){st.resizeBound=true;window.addEventListener('resize',function(){if(st.mode!=='page')return;st.locked=true;clearTimeout(st.resizeTimer);st.resizeTimer=setTimeout(function(){var r=st.progress()/1000;st.measure(r);},220);});}" +
                     "var images=Array.prototype.slice.call(flow.querySelectorAll('img'));var waits=images.map(function(im){if(im.complete)return Promise.resolve();return new Promise(function(done){var f=function(){done();};im.addEventListener('load',f,{once:true});im.addEventListener('error',f,{once:true});});});" +
@@ -1412,7 +1492,10 @@ public class BookReaderActivity extends Activity {
                     "st.applyTypography();" +
                     "st.goToFragment=function(id){try{if(!id)return false;var el=document.getElementById(id);if(!el&&document.getElementsByName){var named=document.getElementsByName(id);if(named&&named.length)el=named[0];}if(!el)return false;el.scrollIntoView({block:'start'});return true;}catch(e){return false;}};" +
                     "if(!window.__wowScrollBound){window.__wowScrollBound=true;var t=0;window.addEventListener('scroll',function(){if(window.__wowPageEngine&&window.__wowPageEngine.mode==='page')return;clearTimeout(t);t=setTimeout(function(){var h=Math.max(1,document.documentElement.scrollHeight-window.innerHeight);WoW.onScroll(Math.round((window.scrollY/h)*1000));},90);},{passive:true});}" +
-                    (restore >= 0 ? "setTimeout(function(){var h=Math.max(0,document.documentElement.scrollHeight-window.innerHeight);window.scrollTo(0,h*" + ratio + ");},90);" : "") +
+                    "var finishWowStyle=function(){requestAnimationFrame(function(){requestAnimationFrame(function(){" +
+                    (restore >= 0 ? "var h=Math.max(0,document.documentElement.scrollHeight-window.innerHeight);window.scrollTo(0,h*" + ratio + ");" : "") +
+                    (styleToken > 0 ? "WoW.onStyleReady(" + styleToken + ");" : "") +
+                    "});});};if(document.fonts&&document.fonts.ready)document.fonts.ready.then(finishWowStyle);else finishWowStyle();" +
                     "}catch(e){}})();";
         }
 
@@ -2188,8 +2271,8 @@ public class BookReaderActivity extends Activity {
         TextView minusFont = sheetChip("A−", false);
         TextView fontValue = sheetChip(fontPercent + "%", true);
         TextView plusFont = sheetChip("A+", false);
-        minusFont.setOnClickListener(v -> { fontPercent = Math.max(80, fontPercent - 10); fontValue.setText(fontPercent + "%"); saveReaderPreferences(); applyReaderStyle(true); });
-        plusFont.setOnClickListener(v -> { fontPercent = Math.min(200, fontPercent + 10); fontValue.setText(fontPercent + "%"); saveReaderPreferences(); applyReaderStyle(true); });
+        minusFont.setOnClickListener(v -> { fontPercent = Math.max(80, fontPercent - 10); fontValue.setText(fontPercent + "%"); saveReaderPreferences(); applyReaderStyleSmooth(true); });
+        plusFont.setOnClickListener(v -> { fontPercent = Math.min(200, fontPercent + 10); fontValue.setText(fontPercent + "%"); saveReaderPreferences(); applyReaderStyleSmooth(true); });
         fontSizeRow.addView(minusFont, sheetChipLp(false));
         fontSizeRow.addView(fontValue, sheetChipLp(true));
         fontSizeRow.addView(plusFont, sheetChipLp(true));
@@ -2203,8 +2286,8 @@ public class BookReaderActivity extends Activity {
         TextView lineMinus = sheetChip("−", false);
         TextView lineValue = sheetChip(lineSpacingDisplay(), true);
         TextView linePlus = sheetChip("+", false);
-        lineMinus.setOnClickListener(v -> { lineSpacing = Math.max(120, lineSpacing - 10); lineValue.setText(lineSpacingDisplay()); saveReaderPreferences(); applyReaderStyle(true); });
-        linePlus.setOnClickListener(v -> { lineSpacing = Math.min(220, lineSpacing + 10); lineValue.setText(lineSpacingDisplay()); saveReaderPreferences(); applyReaderStyle(true); });
+        lineMinus.setOnClickListener(v -> { lineSpacing = Math.max(120, lineSpacing - 10); lineValue.setText(lineSpacingDisplay()); saveReaderPreferences(); applyReaderStyleSmooth(true); });
+        linePlus.setOnClickListener(v -> { lineSpacing = Math.min(220, lineSpacing + 10); lineValue.setText(lineSpacingDisplay()); saveReaderPreferences(); applyReaderStyleSmooth(true); });
         lineRow.addView(lineMinus, sheetChipLp(false));
         lineRow.addView(lineValue, sheetChipLp(true));
         lineRow.addView(linePlus, sheetChipLp(true));
@@ -2218,7 +2301,7 @@ public class BookReaderActivity extends Activity {
         for (int i = 0; i < 3; i++) {
             alignChips[i] = sheetChip(alignLabels[i], alignValues[i].equals(textAlignment));
             final int idx = i;
-            alignChips[i].setOnClickListener(v -> { textAlignment = alignValues[idx]; saveReaderPreferences(); applyReaderStyle(true); selectSheetChip(alignChips, idx); });
+            alignChips[i].setOnClickListener(v -> { textAlignment = alignValues[idx]; saveReaderPreferences(); applyReaderStyleSmooth(true); selectSheetChip(alignChips, idx); });
             alignRow.addView(alignChips[i], sheetChipLp(i > 0));
         }
         card.addView(alignRow);
@@ -2232,7 +2315,7 @@ public class BookReaderActivity extends Activity {
         for (int i = 0; i < 3; i++) {
             marginChips[i] = sheetChip(marginLabels[i], i == marginSelected);
             final int idx = i;
-            marginChips[i].setOnClickListener(v -> { marginPercent = marginValues[idx]; saveReaderPreferences(); applyReaderStyle(true); selectSheetChip(marginChips, idx); });
+            marginChips[i].setOnClickListener(v -> { marginPercent = marginValues[idx]; saveReaderPreferences(); applyReaderStyleSmooth(true); selectSheetChip(marginChips, idx); });
             marginRow.addView(marginChips[i], sheetChipLp(i > 0));
         }
         card.addView(marginRow);
@@ -2242,7 +2325,7 @@ public class BookReaderActivity extends Activity {
         TextView[] modeChips = {sheetChip("Pages", "page".equals(readingMode)), sheetChip("Scroll", "scroll".equals(readingMode))};
         for (int i = 0; i < 2; i++) {
             final int idx = i;
-            modeChips[i].setOnClickListener(v -> { readingMode = idx == 0 ? "page" : "scroll"; pageTurnLocked = false; saveReaderPreferences(); applyReaderStyle(true); selectSheetChip(modeChips, idx); });
+            modeChips[i].setOnClickListener(v -> { readingMode = idx == 0 ? "page" : "scroll"; pageTurnLocked = false; saveReaderPreferences(); applyReaderStyleSmooth(true); selectSheetChip(modeChips, idx); });
             modeRow.addView(modeChips[i], sheetChipLp(i > 0));
         }
         card.addView(modeRow);
@@ -2406,7 +2489,7 @@ public class BookReaderActivity extends Activity {
                         case 3:
                             autoSpacingAdjustment = !autoSpacingAdjustment;
                             saveReaderPreferences();
-                            applyReaderStyle(true);
+                            applyReaderStyleSmooth(true);
                             showReaderSettings();
                             break;
                         case 4: showFontSizeDialog(); break;
@@ -2482,7 +2565,7 @@ public class BookReaderActivity extends Activity {
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
                     textAlignment = values[which];
                     saveReaderPreferences();
-                    applyReaderStyle(true);
+                    applyReaderStyleSmooth(true);
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -2530,7 +2613,7 @@ public class BookReaderActivity extends Activity {
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
                     fontPercent = values[which];
                     saveReaderPreferences();
-                    applyReaderStyle(true);
+                    applyReaderStyleSmooth(true);
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -2618,7 +2701,7 @@ public class BookReaderActivity extends Activity {
                                     if (wasSelected) {
                                         fontChoice = "publisher";
                                         saveReaderPreferences();
-                                        applyReaderStyle(true);
+                                        applyReaderStyleSmooth(true);
                                     }
                                     Toast.makeText(this, "Font removed", Toast.LENGTH_SHORT).show();
                                 }
@@ -2638,7 +2721,7 @@ public class BookReaderActivity extends Activity {
             ReaderFontStore.FontEntry imported = ReaderFontStore.importFont(this, uri);
             fontChoice = imported.id;
             saveReaderPreferences();
-            applyReaderStyle(true);
+            applyReaderStyleSmooth(true);
             Toast.makeText(this, "Font added · " + imported.label, Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Toast.makeText(this, "Font import failed · " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -2658,7 +2741,7 @@ public class BookReaderActivity extends Activity {
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
                     lineSpacing = values[which];
                     saveReaderPreferences();
-                    applyReaderStyle(true);
+                    applyReaderStyleSmooth(true);
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -2678,7 +2761,7 @@ public class BookReaderActivity extends Activity {
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
                     marginPercent = values[which];
                     saveReaderPreferences();
-                    applyReaderStyle(true);
+                    applyReaderStyleSmooth(true);
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -2693,7 +2776,7 @@ public class BookReaderActivity extends Activity {
                 .setSingleChoiceItems(labels, readerTheme, (dialog, which) -> {
                     readerTheme = which;
                     saveReaderPreferences();
-                    applyReaderStyle(true);
+                    applyReaderStyleSmooth(true);
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -3336,6 +3419,11 @@ public class BookReaderActivity extends Activity {
                 updateEpubPageProgress(page, count, p);
                 completePageReady(generation);
             });
+        }
+
+        @JavascriptInterface
+        public void onStyleReady(int token) {
+            runOnUiThread(() -> finishReaderStyleReflow(token));
         }
 
         @JavascriptInterface
