@@ -1,0 +1,47 @@
+name: Apply WoW Reader v2.4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v240.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply reader changes
+        run: python3 tools/apply_v240.py
+
+      - name: Bundle additional Myanmar fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/fonts
+          curl --retry 3 -fsSL 'https://raw.githubusercontent.com/whispermmepub/Review/main/assets/Burma001-Regular.ttf' -o app/src/main/assets/fonts/burma001.ttf
+          curl --retry 3 -fsSL 'https://raw.githubusercontent.com/whispermmepub/Review/main/assets/M01-PuPu-Bold.ttf' -o app/src/main/assets/fonts/m01_pupu_bold.ttf
+          curl --retry 3 -fsSL 'https://raw.githubusercontent.com/whispermmepub/Review/main/assets/MyanmarAyarTyepwriter.ttf' -o app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
+          curl --retry 3 -fsSL 'https://raw.githubusercontent.com/whispermmepub/Review/main/assets/Phantee-Hand-Written.ttf' -o app/src/main/assets/fonts/phantee_hand_written.ttf
+          test -s app/src/main/assets/fonts/burma001.ttf
+          test -s app/src/main/assets/fonts/m01_pupu_bold.ttf
+          test -s app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
+          test -s app/src/main/assets/fonts/phantee_hand_written.ttf
+
+      - name: Commit v2.4 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app build.gradle README.md
+          git diff --cached --check
+          git commit -m 'Add custom fonts and natural paper curl for v2.4.0'
+          git push origin HEAD:main
