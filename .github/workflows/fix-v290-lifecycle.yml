@@ -1,0 +1,45 @@
+name: Fix WoW Reader v2.9 lifecycle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/fix_v290_lifecycle.py'
+      - '.github/workflows/fix-v290-lifecycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Apply lifecycle fix
+        run: python tools/fix_v290_lifecycle.py
+
+      - name: Validate lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          R=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          test "$(grep -c 'public void onWindowFocusChanged' "$R")" -eq 1
+          test "$(grep -c 'protected void onResume' "$R")" -eq 1
+          grep -q 'postDelayed(this::enterImmersive, 55L)' "$R"
+          grep -q 'postDelayed(this::enterImmersive, 80L)' "$R"
+          git diff --check
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          git commit -m 'Fix v2.9 immersive lifecycle hooks'
+          git push origin HEAD:main
