@@ -86,6 +86,7 @@ public class BookReaderActivity extends Activity {
     private static final int SEL_COPY = 9304;
     private static final int REQ_IMPORT_FONT = 9401;
     private boolean controlsVisible = false;
+    private FrameLayout readerLoadingOverlay;
 
     private WebView webView;
     private PageCurlView pageCurlView;
@@ -187,7 +188,11 @@ public class BookReaderActivity extends Activity {
             textAlignment = "justify";
         autoSpacingAdjustment = prefs.getBoolean("epub_auto_spacing", true);
         pageAnimation = prefs.getString("epub_page_animation", "none");
-        if (!"paper".equals(pageAnimation) && !"slide".equals(pageAnimation) && !"none".equals(pageAnimation))
+        if ("paper".equals(pageAnimation)) {
+            pageAnimation = "none";
+            prefs.edit().putString("epub_page_animation", "none").apply();
+        }
+        if (!"slide".equals(pageAnimation) && !"none".equals(pageAnimation))
             pageAnimation = "none";
         if (!prefs.getBoolean("reader_v20_defaults_applied", false)) {
             pageAnimation = "none";
@@ -230,6 +235,57 @@ public class BookReaderActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         if (isPdf) setupPdfView(content); else setupWebView(content);
+
+        if (!isPdf) {
+            readerLoadingOverlay = new FrameLayout(this);
+            readerLoadingOverlay.setClickable(true);
+            int loadingBg = readerTheme == 2 ? Color.rgb(18, 18, 18) :
+                    (readerTheme == 1 ? Color.rgb(244, 236, 216) : Color.rgb(250, 250, 252));
+            readerLoadingOverlay.setBackgroundColor(loadingBg);
+
+            LinearLayout loadingCard = new LinearLayout(this);
+            loadingCard.setOrientation(LinearLayout.VERTICAL);
+            loadingCard.setGravity(Gravity.CENTER);
+            loadingCard.setPadding(dp(24), dp(20), dp(24), dp(20));
+
+            ImageView loadingLogo = new ImageView(this);
+            loadingLogo.setImageResource(R.drawable.wow_logo);
+            loadingLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            loadingLogo.setAlpha(0.96f);
+            loadingCard.addView(loadingLogo, new LinearLayout.LayoutParams(dp(72), dp(72)));
+
+            TextView loadingTitle = new TextView(this);
+            loadingTitle.setText("Opening book…");
+            loadingTitle.setTextSize(16);
+            loadingTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+            loadingTitle.setTextColor(readerTheme == 2 ? Color.rgb(235, 237, 241) : Color.rgb(52, 54, 61));
+            loadingTitle.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams loadingTitleLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            loadingTitleLp.topMargin = dp(12);
+            loadingCard.addView(loadingTitle, loadingTitleLp);
+
+            TextView loadingSub = new TextView(this);
+            loadingSub.setText("Preparing your reading page");
+            loadingSub.setTextSize(12.5f);
+            loadingSub.setTextColor(readerTheme == 2 ? Color.rgb(168, 172, 181) : Color.rgb(112, 116, 126));
+            loadingSub.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams loadingSubLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            loadingSubLp.topMargin = dp(5);
+            loadingCard.addView(loadingSub, loadingSubLp);
+
+            FrameLayout.LayoutParams loadingCardLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+            readerLoadingOverlay.addView(loadingCard, loadingCardLp);
+            root.addView(readerLoadingOverlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            loadingCard.setScaleX(0.97f);
+            loadingCard.setScaleY(0.97f);
+            loadingCard.setAlpha(0f);
+            loadingCard.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.35f)).start();
+        }
 
         nightLightOverlay = new View(this);
         nightLightOverlay.setClickable(false);
@@ -392,6 +448,19 @@ public class BookReaderActivity extends Activity {
         updateAnnotationButton();
         hideControls();
         enterImmersive();
+    }
+
+    private void hideInitialReaderLoading() {
+        if (readerLoadingOverlay == null || readerLoadingOverlay.getVisibility() != View.VISIBLE) return;
+        readerLoadingOverlay.animate().cancel();
+        readerLoadingOverlay.animate().alpha(0f).setDuration(160L)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> {
+                    if (readerLoadingOverlay != null) {
+                        readerLoadingOverlay.setVisibility(View.GONE);
+                        readerLoadingOverlay.setAlpha(1f);
+                    }
+                }).start();
     }
 
     private TextView iconButton(String text, int size) {
@@ -973,6 +1042,7 @@ public class BookReaderActivity extends Activity {
 
                     if (spine.isEmpty()) {
                         chapterLoading = false;
+                        hideInitialReaderLoading();
                         Toast.makeText(this, "This EPUB has no readable chapters", Toast.LENGTH_LONG).show();
                         return;
                     }
@@ -988,6 +1058,7 @@ public class BookReaderActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     chapterLoading = false;
+                    hideInitialReaderLoading();
                     Toast.makeText(this, "EPUB error: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     positionView.setText("Unable to open EPUB");
                 });
@@ -1233,7 +1304,8 @@ public class BookReaderActivity extends Activity {
                 "html,body{background:" + bg + " !important;color:" + fg + " !important;}" +
                 "a{color:" + link + " !important;}" +
                 "pre{white-space:pre-wrap !important;overflow-wrap:anywhere !important;}" +
-                ".wow-reader-block{letter-spacing:normal !important;}" +
+                ".wow-reader-block{line-height:" + line + " !important;letter-spacing:normal !important;}" +
+                ".wow-reader-block *{line-height:inherit !important;}" +
                 ".wow-align-justify{text-align:justify !important;text-align-last:start !important;}" +
                 ".wow-align-left{text-align:left !important;text-align-last:auto !important;}" +
                 ".wow-align-right{text-align:right !important;text-align-last:auto !important;}" +
@@ -1417,8 +1489,10 @@ public class BookReaderActivity extends Activity {
     private void revealStableChapter() {
         if (webView != null) {
             webView.animate().cancel();
-            webView.setAlpha(1f);
+            webView.animate().alpha(1f).setDuration(135L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         }
+        hideInitialReaderLoading();
         pageTurnLocked = false;
         chapterLoading = false;
         pendingChapterCurlDirection = 0;
@@ -2175,10 +2249,10 @@ public class BookReaderActivity extends Activity {
 
         addSheetLabel(card, "Page animation", sub);
         LinearLayout animRow = sheetRow();
-        String[] animLabels = {"None", "3D", "Slide"};
-        String[] animValues = {"none", "paper", "slide"};
-        TextView[] animChips = new TextView[3];
-        for (int i = 0; i < 3; i++) {
+        String[] animLabels = {"None", "Slide"};
+        String[] animValues = {"none", "slide"};
+        TextView[] animChips = new TextView[2];
+        for (int i = 0; i < 2; i++) {
             animChips[i] = sheetChip(animLabels[i], animValues[i].equals(pageAnimation));
             final int idx = i;
             animChips[i].setOnClickListener(v -> { pageAnimation = animValues[idx]; saveReaderPreferences(); selectSheetChip(animChips, idx); });
@@ -2385,9 +2459,9 @@ public class BookReaderActivity extends Activity {
     }
 
     private void showPageAnimationDialog() {
-        String[] labels = {"None · default", "3D page curl", "Smooth slide"};
-        String[] values = {"none", "paper", "slide"};
-        int selected = "paper".equals(pageAnimation) ? 1 : ("slide".equals(pageAnimation) ? 2 : 0);
+        String[] labels = {"None · default", "Smooth slide"};
+        String[] values = {"none", "slide"};
+        int selected = "slide".equals(pageAnimation) ? 1 : 0;
         new AlertDialog.Builder(this)
                 .setTitle("Page animation")
                 .setSingleChoiceItems(labels, selected, (dialog, which) -> {
@@ -2693,9 +2767,7 @@ public class BookReaderActivity extends Activity {
     }
 
     private String pageAnimationDisplayName() {
-        if ("slide".equals(pageAnimation)) return "Slide";
-        if ("none".equals(pageAnimation)) return "None";
-        return "3D page curl";
+        return "slide".equals(pageAnimation) ? "Slide" : "None";
     }
 
     private String alignmentDisplayName() {

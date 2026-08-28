@@ -89,8 +89,7 @@ public class MainActivity extends Activity {
         if (!libraryDir.exists()) libraryDir.mkdirs();
         if (!coverCacheDir.exists()) coverCacheDir.mkdirs();
         prefs = getSharedPreferences("wow_reader", MODE_PRIVATE);
-        googleDrive = new GoogleDriveSync(this);
-        restoreStoredGoogleProfile();
+        // Google account / Drive sync is intentionally deferred for a later release.
         gridMode = prefs.getBoolean("library_grid", true);
         sortMode = prefs.getString("library_sort", "added");
         if (!"added".equals(sortMode) && !"opened".equals(sortMode) &&
@@ -111,7 +110,6 @@ public class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (libraryRecycler != null) refreshLibrary();
-        maybeAutoGoogleSync();
     }
 
     private void buildUi() {
@@ -660,14 +658,6 @@ public class MainActivity extends Activity {
         brandCopy.addView(brand);
         brandCopy.addView(sub);
         brandRow.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        accountButton = iconButton("G");
-        accountButton.setTextSize(15);
-        accountButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        accountButton.setContentDescription("Google account and sync");
-        accountButton.setOnClickListener(v -> showAccountMenu());
-        updateAccountButton();
-        brandRow.addView(accountButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         viewModeButton = iconButton(gridMode ? "☷" : "▦");
         viewModeButton.setTextSize(17);
