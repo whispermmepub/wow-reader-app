@@ -40,6 +40,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.text.Collator;
 import java.util.Locale;
 
 import androidx.recyclerview.widget.GridLayoutManager;
@@ -63,6 +64,12 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private boolean gridMode;
     private String searchQuery = "";
+    private Typeface pyidaungsuTypeface;
+    private TextView sortButton;
+    private String sortMode = "added";
+    private volatile boolean metadataWarmupRunning = false;
+    private final Collator myanmarCollator = Collator.getInstance(new Locale("my", "MM"));
+    private final Collator englishCollator = Collator.getInstance(Locale.ENGLISH);
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -75,6 +82,17 @@ public class MainActivity extends Activity {
         if (!coverCacheDir.exists()) coverCacheDir.mkdirs();
         prefs = getSharedPreferences("wow_reader", MODE_PRIVATE);
         gridMode = prefs.getBoolean("library_grid", true);
+        sortMode = prefs.getString("library_sort", "added");
+        if (!"added".equals(sortMode) && !"opened".equals(sortMode) &&
+                !"title_asc".equals(sortMode) && !"title_desc".equals(sortMode))
+            sortMode = "added";
+        myanmarCollator.setStrength(Collator.PRIMARY);
+        englishCollator.setStrength(Collator.PRIMARY);
+        try {
+            pyidaungsuTypeface = Typeface.createFromAsset(getAssets(), "fonts/pyidaungsu_native.ttf");
+        } catch (Exception ignored) {
+            pyidaungsuTypeface = null;
+        }
         buildUi();
         handleIncomingIntent(getIntent());
     }
@@ -90,7 +108,13 @@ public class MainActivity extends Activity {
         libraryRecycler.setBackgroundColor(Color.TRANSPARENT);
         libraryRecycler.setClipToPadding(false);
         libraryRecycler.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        libraryRecycler.setItemAnimator(null);
+        androidx.recyclerview.widget.DefaultItemAnimator itemAnimator = new androidx.recyclerview.widget.DefaultItemAnimator();
+        itemAnimator.setSupportsChangeAnimations(false);
+        itemAnimator.setAddDuration(135L);
+        itemAnimator.setRemoveDuration(110L);
+        itemAnimator.setMoveDuration(170L);
+        libraryRecycler.setItemAnimator(itemAnimator);
+        libraryRecycler.setItemViewCacheSize(12);
         libraryRecycler.setPadding(0, 0, 0, dp(96));
 
         libraryAdapter = new LibraryAdapter();
@@ -240,20 +264,133 @@ public class MainActivity extends Activity {
     private void refreshLibrary() {
         File[] all = libraryDir.listFiles(file -> file.isFile() && isBook(file.getName()));
         if (all == null) all = new File[0];
-        Arrays.sort(all, (a, b) -> {
-            long aa = prefs.getLong("last_opened_" + a.getName(), a.lastModified());
-            long bb = prefs.getLong("last_opened_" + b.getName(), b.lastModified());
-            return Long.compare(bb, aa);
-        });
+        sortLibraryFiles(all);
+
         visibleBooks.clear();
         for (File f : all) {
-            if (searchQuery.isEmpty() || stripExtension(f.getName()).toLowerCase(Locale.ROOT).contains(searchQuery))
+            String cachedTitle = cachedLibraryTitle(f).toLowerCase(Locale.ROOT);
+            String fileTitle = stripExtension(f.getName()).toLowerCase(Locale.ROOT);
+            if (searchQuery.isEmpty() || cachedTitle.contains(searchQuery) || fileTitle.contains(searchQuery))
                 visibleBooks.add(f);
         }
         if (libraryAdapter != null) libraryAdapter.submit(visibleBooks);
         if (countView != null) countView.setText(visibleBooks.size() + (visibleBooks.size() == 1 ? " book" : " books"));
+        if (sortButton != null) sortButton.setText(sortButtonLabel());
+
+        if (isAlphabeticalSort()) warmSortMetadataIfNeeded(all);
     }
 
+    private void sortLibraryFiles(File[] files) {
+        if (files == null || files.length < 2) return;
+        Arrays.sort(files, (a, b) -> {
+            if ("title_asc".equals(sortMode)) return compareBookTitles(a, b);
+            if ("title_desc".equals(sortMode)) return -compareBookTitles(a, b);
+            if ("opened".equals(sortMode)) {
+                int c = Long.compare(openedTime(b), openedTime(a));
+                return c != 0 ? c : compareBookTitles(a, b);
+            }
+            int c = Long.compare(addedTime(b), addedTime(a));
+            return c != 0 ? c : compareBookTitles(a, b);
+        });
+    }
+
+    private long addedTime(File file) {
+        return prefs.getLong("added_at_" + file.getName(), file.lastModified());
+    }
+
+    private long openedTime(File file) {
+        return prefs.getLong("last_opened_" + file.getName(), 0L);
+    }
+
+    private boolean isAlphabeticalSort() {
+        return "title_asc".equals(sortMode) || "title_desc".equals(sortMode);
+    }
+
+    private String cachedLibraryTitle(File file) {
+        String fallback = stripExtension(file.getName());
+        String value = prefs.getString("library_title_" + file.getName(), fallback);
+        return value == null || value.trim().isEmpty() ? fallback : value.trim();
+    }
+
+    private int compareBookTitles(File a, File b) {
+        String ta = normalizeSortTitle(cachedLibraryTitle(a));
+        String tb = normalizeSortTitle(cachedLibraryTitle(b));
+        int ga = titleScriptGroup(ta);
+        int gb = titleScriptGroup(tb);
+        if (ga != gb) return Integer.compare(ga, gb);
+        int c;
+        if (ga == 0) c = myanmarCollator.compare(ta, tb);
+        else c = englishCollator.compare(ta, tb);
+        if (c != 0) return c;
+        return ta.compareToIgnoreCase(tb);
+    }
+
+    private String normalizeSortTitle(String value) {
+        if (value == null) return "";
+        String s = value.trim();
+        int offset = 0;
+        while (offset < s.length()) {
+            int cp = s.codePointAt(offset);
+            if (Character.isLetterOrDigit(cp) || isMyanmarCodePoint(cp)) break;
+            offset += Character.charCount(cp);
+        }
+        return offset >= s.length() ? s : s.substring(offset);
+    }
+
+    private int titleScriptGroup(String value) {
+        if (value == null || value.isEmpty()) return 3;
+        for (int i = 0; i < value.length();) {
+            int cp = value.codePointAt(i);
+            if (isMyanmarCodePoint(cp)) return 0;
+            if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return 1;
+            if (Character.isDigit(cp)) return 2;
+            if (Character.isLetter(cp)) return 2;
+            i += Character.charCount(cp);
+        }
+        return 3;
+    }
+
+    private boolean isMyanmarCodePoint(int cp) {
+        return (cp >= 0x1000 && cp <= 0x109F) ||
+                (cp >= 0xA9E0 && cp <= 0xA9FF) ||
+                (cp >= 0xAA60 && cp <= 0xAA7F);
+    }
+
+    private void warmSortMetadataIfNeeded(File[] files) {
+        if (metadataWarmupRunning || files == null || files.length == 0) return;
+        boolean missing = false;
+        for (File f : files) {
+            if (f.getName().toLowerCase(Locale.ROOT).endsWith(".epub") &&
+                    !prefs.contains("library_title_" + f.getName())) {
+                missing = true;
+                break;
+            }
+        }
+        if (!missing) return;
+        metadataWarmupRunning = true;
+        final File[] snapshot = files.clone();
+        new Thread(() -> {
+            SharedPreferences.Editor edit = prefs.edit();
+            boolean changed = false;
+            for (File f : snapshot) {
+                if (!f.getName().toLowerCase(Locale.ROOT).endsWith(".epub") ||
+                        prefs.contains("library_title_" + f.getName())) continue;
+                String title = stripExtension(f.getName());
+                try {
+                    EpubUtil.Summary summary = EpubUtil.extractSummary(f, coverCacheDir);
+                    if (summary.title != null && !summary.title.trim().isEmpty()) title = summary.title.trim();
+                } catch (Exception ignored) {}
+                edit.putString("library_title_" + f.getName(), title);
+                changed = true;
+            }
+            edit.apply();
+            final boolean shouldRefresh = changed;
+            runOnUiThread(() -> {
+                metadataWarmupRunning = false;
+                if (shouldRefresh && isAlphabeticalSort()) refreshLibrary();
+            });
+        }, "wow-library-metadata").start();
+    }
 
     private void addGrid(List<File> files) {
         // Retained for binary/source compatibility. The v2.6 library uses RecyclerView.
@@ -292,7 +429,7 @@ public class MainActivity extends Activity {
         title.setText(initial);
         title.setTextSize(14.5f);
         title.setTextColor(Color.rgb(29, 31, 37));
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        applyBookTitleTypeface(title);
         title.setMaxLines(2);
         title.setLineSpacing(0f, 1.05f);
         title.setPadding(dp(2), dp(9), dp(2), 0);
@@ -346,7 +483,7 @@ public class MainActivity extends Activity {
         title.setText(initial);
         title.setTextSize(16);
         title.setTextColor(Color.rgb(29, 31, 37));
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        applyBookTitleTypeface(title);
         title.setMaxLines(2);
         text.addView(title);
 
@@ -483,19 +620,75 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(20), dp(8), dp(20), dp(8));
+        row.setPadding(dp(20), dp(7), dp(16), dp(9));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
         TextView label = new TextView(this);
         label.setText("Library");
         label.setTextSize(18);
         label.setTextColor(Color.rgb(31, 34, 40));
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        row.addView(label, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        copy.addView(label);
+
         countView = new TextView(this);
-        countView.setTextSize(12);
-        countView.setTextColor(Color.rgb(106, 111, 124));
-        countView.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        row.addView(countView, new LinearLayout.LayoutParams(dp(100), dp(42)));
+        countView.setTextSize(10.5f);
+        countView.setTextColor(Color.rgb(112, 116, 128));
+        countView.setPadding(0, dp(1), 0, 0);
+        copy.addView(countView);
+        row.addView(copy, new LinearLayout.LayoutParams(0, dp(48), 1f));
+
+        sortButton = new TextView(this);
+        sortButton.setText(sortButtonLabel());
+        sortButton.setTextSize(11.5f);
+        sortButton.setTextColor(Color.rgb(67, 68, 190));
+        sortButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        sortButton.setGravity(Gravity.CENTER);
+        sortButton.setPadding(dp(12), 0, dp(12), 0);
+        sortButton.setSingleLine(true);
+        sortButton.setBackground(roundRect(Color.argb(220, 255, 255, 255), dp(19), dp(1), Color.argb(72, 126, 126, 210)));
+        sortButton.setElevation(dp(1));
+        sortButton.setOnClickListener(v -> showSortDialog());
+        sortButton.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
+                v.animate().scaleX(0.965f).scaleY(0.965f).setDuration(70L).start();
+            else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP || e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL)
+                v.animate().scaleX(1f).scaleY(1f).setDuration(110L).start();
+            return false;
+        });
+        row.addView(sortButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)));
         return row;
+    }
+
+    private String sortButtonLabel() {
+        if ("opened".equals(sortMode)) return "Recently opened  ▾";
+        if ("title_asc".equals(sortMode)) return "က–အ · A–Z  ▾";
+        if ("title_desc".equals(sortMode)) return "အ–က · Z–A  ▾";
+        return "Recently added  ▾";
+    }
+
+    private void showSortDialog() {
+        String[] labels = {
+                "Recently added",
+                "Recently opened",
+                "Title · က–အ / A–Z",
+                "Title · အ–က / Z–A"
+        };
+        String[] values = {"added", "opened", "title_asc", "title_desc"};
+        int selected = "opened".equals(sortMode) ? 1 :
+                ("title_asc".equals(sortMode) ? 2 : ("title_desc".equals(sortMode) ? 3 : 0));
+        new AlertDialog.Builder(this)
+                .setTitle("Sort library")
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    sortMode = values[which];
+                    prefs.edit().putString("library_sort", sortMode).apply();
+                    if (sortButton != null) sortButton.setText(sortButtonLabel());
+                    refreshLibrary();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private View buildEmptyState() {
@@ -576,29 +769,83 @@ public class MainActivity extends Activity {
 
     private void loadBookVisual(File file,ImageView cover,TextView titleView,TextView metaView){
         new Thread(()->{ String title=stripExtension(file.getName()),author=""; Bitmap bitmap=null; try{ if(file.getName().toLowerCase(Locale.ROOT).endsWith(".epub")){ EpubUtil.Summary s=EpubUtil.extractSummary(file,coverCacheDir); if(s.title!=null&&!s.title.isEmpty()) title=s.title; if(s.author!=null) author=s.author; if(s.cover!=null&&s.cover.isFile()) bitmap=BitmapFactory.decodeFile(s.cover.getAbsolutePath()); } else bitmap=renderPdfCover(file); }catch(Exception ignored){}
-            String ft=title,fa=author; Bitmap fb=bitmap; int progress=prefs.getInt("percent_"+file.getName(),0); runOnUiThread(()->{ if(fb!=null) cover.setImageBitmap(fb); titleView.setText(ft); String type=file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB"; metaView.setText(fa.isEmpty()?type+" · "+progress+"%":fa+" · "+progress+"%"); }); }).start();
+            prefs.edit().putString("library_title_" + file.getName(), title).apply();
+            String ft=title,fa=author; Bitmap fb=bitmap; int progress=prefs.getInt("percent_"+file.getName(),0); runOnUiThread(()->{ if(fb!=null) cover.setImageBitmap(fb); titleView.setText(ft); applyBookTitleTypeface(titleView); String type=file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB"; metaView.setText(fa.isEmpty()?type+" · "+progress+"%":fa+" · "+progress+"%"); }); }).start();
     }
 
     private Bitmap renderPdfCover(File file){ ParcelFileDescriptor pfd=null; PdfRenderer renderer=null; PdfRenderer.Page page=null; try{ pfd=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY); renderer=new PdfRenderer(pfd); if(renderer.getPageCount()==0)return null; page=renderer.openPage(0); int width=360,height=Math.max(1,Math.round(width*(page.getHeight()/(float)page.getWidth()))); Bitmap b=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888); b.eraseColor(Color.WHITE); page.render(b,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); return b; }catch(Exception e){return null;} finally{try{if(page!=null)page.close();}catch(Exception ignored){} try{if(renderer!=null)renderer.close();}catch(Exception ignored){} try{if(pfd!=null)pfd.close();}catch(Exception ignored){}} }
 
-    private Bitmap placeholderBitmap(String title,int width,int height){ Bitmap b=Bitmap.createBitmap(Math.max(1,width),Math.max(1,height),Bitmap.Config.ARGB_8888); Canvas c=new Canvas(b); Paint p=new Paint(Paint.ANTI_ALIAS_FLAG); p.setColor(colorForName(title)); c.drawRect(0,0,b.getWidth(),b.getHeight(),p); p.setColor(Color.WHITE); p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(Math.min(width,height)*.25f); p.setTextAlign(Paint.Align.CENTER); String letter=title==null||title.trim().isEmpty()?"W":title.trim().substring(0,1).toUpperCase(Locale.ROOT); Paint.FontMetrics fm=p.getFontMetrics(); float y=height/2f-(fm.ascent+fm.descent)/2f; c.drawText(letter,width/2f,y,p); return b; }
+    private Bitmap placeholderBitmap(String title,int width,int height){ Bitmap b=Bitmap.createBitmap(Math.max(1,width),Math.max(1,height),Bitmap.Config.ARGB_8888); Canvas c=new Canvas(b); Paint p=new Paint(Paint.ANTI_ALIAS_FLAG); p.setColor(colorForName(title)); c.drawRect(0,0,b.getWidth(),b.getHeight(),p); p.setColor(Color.WHITE); p.setTypeface(Typeface.create(pyidaungsuTypeface != null ? pyidaungsuTypeface : Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(Math.min(width,height)*.25f); p.setTextAlign(Paint.Align.CENTER); String letter=title==null||title.trim().isEmpty()?"W":title.trim().substring(0,1).toUpperCase(Locale.ROOT); Paint.FontMetrics fm=p.getFontMetrics(); float y=height/2f-(fm.ascent+fm.descent)/2f; c.drawText(letter,width/2f,y,p); return b; }
 
     private void chooseBook(){ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("*/*"); i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/epub+zip","application/pdf"}); startActivityForResult(i,REQ_IMPORT); }
-    private void handleIncomingIntent(Intent intent){ if(intent==null||!Intent.ACTION_VIEW.equals(intent.getAction()))return; Uri data=intent.getData(); if(data!=null) importBook(data,true); }
+    private void handleIncomingIntent(Intent intent){
+        if(intent==null)return;
+        Uri data=null;
+        String action=intent.getAction();
+        if(Intent.ACTION_VIEW.equals(action)) data=intent.getData();
+        else if(Intent.ACTION_SEND.equals(action)){
+            try{Object stream=intent.getParcelableExtra(Intent.EXTRA_STREAM);if(stream instanceof Uri)data=(Uri)stream;}catch(Exception ignored){}
+        }
+        if(data!=null){
+            intent.setAction(null);
+            importBook(data,false);
+        }
+    }
 
-    private void importBook(Uri uri,boolean openAfter){ new Thread(()->{ try{ String name=queryDisplayName(uri); if(name==null||name.trim().isEmpty())name="book_"+System.currentTimeMillis(); String lower=name.toLowerCase(Locale.ROOT),mime=getContentResolver().getType(uri); if(!lower.endsWith(".epub")&&!lower.endsWith(".pdf")){ if("application/pdf".equals(mime))name+=".pdf"; else if("application/epub+zip".equals(mime))name+=".epub"; else throw new Exception("Only EPUB and PDF files are supported"); } File out=uniqueFile(name); try(InputStream in=getContentResolver().openInputStream(uri);OutputStream os=new FileOutputStream(out)){if(in==null)throw new Exception("Unable to open file");copy(in,os);} runOnUiThread(()->{Toast.makeText(this,"Added to WoW Reader",Toast.LENGTH_SHORT).show();refreshLibrary();if(openAfter)openBook(out);}); }catch(Exception e){runOnUiThread(()->Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show());} }).start(); }
+    private void importBook(Uri uri,boolean openAfter){
+        new Thread(()->{
+            try{
+                String name=queryDisplayName(uri);
+                if(name==null||name.trim().isEmpty())name="book_"+System.currentTimeMillis();
+                String lower=name.toLowerCase(Locale.ROOT),mime=getContentResolver().getType(uri);
+                if(!lower.endsWith(".epub")&&!lower.endsWith(".pdf")){
+                    if("application/pdf".equals(mime))name+=".pdf";
+                    else if("application/epub+zip".equals(mime))name+=".epub";
+                    else throw new Exception("Only EPUB and PDF files are supported");
+                }
+                File out=uniqueFile(name);
+                try(InputStream in=getContentResolver().openInputStream(uri);OutputStream os=new FileOutputStream(out)){
+                    if(in==null)throw new Exception("Unable to open file");
+                    copy(in,os);
+                }
+                String displayTitle=stripExtension(out.getName());
+                if(out.getName().toLowerCase(Locale.ROOT).endsWith(".epub")){
+                    try{
+                        EpubUtil.Summary summary=EpubUtil.extractSummary(out,coverCacheDir);
+                        if(summary.title!=null&&!summary.title.trim().isEmpty())displayTitle=summary.title.trim();
+                    }catch(Exception ignored){}
+                }
+                prefs.edit()
+                        .putLong("added_at_"+out.getName(),System.currentTimeMillis())
+                        .putString("library_title_"+out.getName(),displayTitle)
+                        .apply();
+                runOnUiThread(()->{
+                    Toast.makeText(this,"Added to Library",Toast.LENGTH_SHORT).show();
+                    refreshLibrary();
+                });
+            }catch(Exception e){
+                runOnUiThread(()->Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show());
+            }
+        },"wow-import-book").start();
+    }
+
+    private void applyBookTitleTypeface(TextView view){
+        if(view==null)return;
+        if(pyidaungsuTypeface!=null)view.setTypeface(pyidaungsuTypeface,Typeface.BOLD);
+        else view.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+    }
 
     private String queryDisplayName(Uri uri){ if("file".equalsIgnoreCase(uri.getScheme()))return new File(uri.getPath()).getName(); Cursor c=null; try{c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null);if(c!=null&&c.moveToFirst())return c.getString(0);}catch(Exception ignored){}finally{if(c!=null)c.close();}return null; }
     private File uniqueFile(String originalName){ String safe=originalName.replaceAll("[\\\\/:*?\"<>|]","_"); File f=new File(libraryDir,safe);if(!f.exists())return f;int dot=safe.lastIndexOf('.');String base=dot>0?safe.substring(0,dot):safe,ext=dot>0?safe.substring(dot):"";return new File(libraryDir,base+"_"+System.currentTimeMillis()+ext); }
-    private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);}
-    private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from library?").setMessage(stripExtension(file.getName())).setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).apply();refreshLibrary();}}).show();}
+    private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out);}
+    private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from library?").setMessage(stripExtension(file.getName())).setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).remove("library_title_"+file.getName()).remove("added_at_"+file.getName()).remove("last_opened_"+file.getName()).apply();refreshLibrary();}}).show();}
 
     private void showCloudMenu(){new AlertDialog.Builder(this).setTitle("Backup & restore").setItems(new String[]{"Backup library","Restore books"},(dialog,which)->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,which==0?REQ_BACKUP:REQ_RESTORE);}).show();}
     @SuppressLint("WrongConstant")
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(requestCode==REQ_IMPORT){importBook(uri,false);return;}try{getContentResolver().takePersistableUriPermission(uri,data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION));}catch(Exception ignored){}if(requestCode==REQ_BACKUP)backupLibrary(uri);else if(requestCode==REQ_RESTORE)restoreLibrary(uri);}
 
     private void backupLibrary(Uri treeUri){new Thread(()->{int count=0;try{File[] files=libraryDir.listFiles();if(files!=null)for(File file:files){if(!isBook(file.getName()))continue;Uri target=findChild(treeUri,file.getName());if(target==null){String mime=file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"application/pdf":"application/epub+zip";target=DocumentsContract.createDocument(getContentResolver(),treeDocumentUri(treeUri),mime,file.getName());}if(target!=null)try(InputStream in=new FileInputStream(file);OutputStream out=getContentResolver().openOutputStream(target,"wt")){if(out!=null){copy(in,out);count++;}}}int n=count;runOnUiThread(()->Toast.makeText(this,"Backup complete: "+n+" books",Toast.LENGTH_LONG).show());}catch(Exception e){runOnUiThread(()->Toast.makeText(this,"Backup failed: "+e.getMessage(),Toast.LENGTH_LONG).show());}}).start();}
-    private void restoreLibrary(Uri treeUri){new Thread(()->{int count=0;Cursor c=null;try{Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null);if(c!=null)while(c.moveToNext()){String id=c.getString(0),name=c.getString(1);if(!isBook(name))continue;Uri doc=DocumentsContract.buildDocumentUriUsingTree(treeUri,id);File out=new File(libraryDir,name.replaceAll("[\\\\/:*?\"<>|]","_"));try(InputStream in=getContentResolver().openInputStream(doc);OutputStream os=new FileOutputStream(out)){if(in!=null){copy(in,os);count++;}}}int n=count;runOnUiThread(()->{refreshLibrary();Toast.makeText(this,"Restored: "+n+" books",Toast.LENGTH_LONG).show();});}catch(Exception e){runOnUiThread(()->Toast.makeText(this,"Restore failed: "+e.getMessage(),Toast.LENGTH_LONG).show());}finally{if(c!=null)c.close();}}).start();}
+    private void restoreLibrary(Uri treeUri){new Thread(()->{int count=0;Cursor c=null;try{Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null);if(c!=null)while(c.moveToNext()){String id=c.getString(0),name=c.getString(1);if(!isBook(name))continue;Uri doc=DocumentsContract.buildDocumentUriUsingTree(treeUri,id);File out=new File(libraryDir,name.replaceAll("[\\\\/:*?\"<>|]","_"));try(InputStream in=getContentResolver().openInputStream(doc);OutputStream os=new FileOutputStream(out)){if(in!=null){copy(in,os);prefs.edit().putLong("added_at_"+out.getName(),System.currentTimeMillis()).apply();count++;}}}int n=count;runOnUiThread(()->{refreshLibrary();Toast.makeText(this,"Restored: "+n+" books",Toast.LENGTH_LONG).show();});}catch(Exception e){runOnUiThread(()->Toast.makeText(this,"Restore failed: "+e.getMessage(),Toast.LENGTH_LONG).show());}finally{if(c!=null)c.close();}}).start();}
     private Uri findChild(Uri treeUri,String name){Cursor c=null;try{Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));c=getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null);if(c!=null)while(c.moveToNext())if(name.equals(c.getString(1)))return DocumentsContract.buildDocumentUriUsingTree(treeUri,c.getString(0));}catch(Exception ignored){}finally{if(c!=null)c.close();}return null;}
     private Uri treeDocumentUri(Uri treeUri){return DocumentsContract.buildDocumentUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));}
     private boolean isBook(String n){String s=n==null?"":n.toLowerCase(Locale.ROOT);return s.endsWith(".epub")||s.endsWith(".pdf");}
