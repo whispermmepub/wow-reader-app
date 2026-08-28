@@ -1,0 +1,58 @@
+name: Apply WoW Reader v2.12
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v212.py'
+      - 'tools/patch_v212_drive.py'
+      - '.github/workflows/apply-v212.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply v2.12 source changes
+        run: |
+          python3 tools/apply_v212.py
+          python3 tools/patch_v212_drive.py
+      - name: Validate migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
+          READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          DRIVE=app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          grep -q 'versionCode 24' app/build.gradle
+          grep -q "versionName '2.12.0'" app/build.gradle
+          grep -q 'play-services-auth:21.4.0' app/build.gradle
+          grep -q 'cachedLibraryAuthor' "$MAIN"
+          grep -q 'showAuthorsDialog' "$MAIN"
+          grep -q 'showAccountMenu' "$MAIN"
+          grep -q 'performGoogleBackup' "$MAIN"
+          grep -q 'performGoogleRestore' "$MAIN"
+          grep -q 'maybeAutoGoogleSync' "$MAIN"
+          grep -q 'library_author_' "$MAIN"
+          grep -q 'sync_updated_ms' "$READER"
+          grep -q 'DRIVE_APPFOLDER' "$DRIVE"
+          grep -q 'appDataFolder' "$DRIVE"
+          grep -q 'X-HTTP-Method-Override' "$DRIVE"
+          git diff --check
+      - name: Commit v2.12 app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/whisper/wowreader/MainActivity.java app/src/main/java/com/whisper/wowreader/BookReaderActivity.java app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'WoW Reader v2.12 author shelves and Google Drive sync'
+          git push origin HEAD:main
