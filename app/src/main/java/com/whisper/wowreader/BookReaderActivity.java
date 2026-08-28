@@ -2580,19 +2580,6 @@ public class BookReaderActivity extends Activity {
         }
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        View decor = getWindow().getDecorView();
-        decor.postDelayed(this::enterImmersive, 80L);
-    }
-
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) getWindow().getDecorView().postDelayed(this::enterImmersive, 55L);
-    }
-
     private void enterImmersive() {
         Window window = getWindow();
         View decor = window.getDecorView();
@@ -2903,14 +2890,14 @@ public class BookReaderActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) enterImmersive();
+        if (hasFocus) getWindow().getDecorView().postDelayed(this::enterImmersive, 55L);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        enterImmersive();
         applyWindowPreferences();
+        getWindow().getDecorView().postDelayed(this::enterImmersive, 80L);
     }
 
     @Override
