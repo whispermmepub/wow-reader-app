@@ -115,7 +115,8 @@ public class MainActivity extends Activity {
         itemAnimator.setRemoveDuration(110L);
         itemAnimator.setMoveDuration(170L);
         libraryRecycler.setItemAnimator(itemAnimator);
-        libraryRecycler.setItemViewCacheSize(12);
+        libraryRecycler.setItemViewCacheSize(20);
+        libraryRecycler.setHasFixedSize(false);
         libraryRecycler.setPadding(0, 0, 0, dp(96));
 
         libraryAdapter = new LibraryAdapter();
