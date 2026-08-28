@@ -45,24 +45,35 @@ jobs:
           test -s app/src/main/java/com/whisper/wowreader/SplashActivity.java
           test -s app/src/main/res/drawable/wow_logo.webp
           test -s app/src/main/assets/fonts/pyidaungsu.woff2
+          test -s app/src/main/assets/fonts/pyidaungsu_native.ttf
           test -s app/src/main/assets/fonts/yoeshin.woff2
           test -s app/src/main/assets/fonts/burma2.woff2
           test -s app/src/main/assets/fonts/burma001.ttf
           test -s app/src/main/assets/fonts/m01_pupu_bold.ttf
           test -s app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
           test -s app/src/main/assets/fonts/phantee_hand_written.ttf
-          grep -q "versionCode 18" app/build.gradle
-          grep -q "versionName '2.6.0'" app/build.gradle
+          grep -q "versionCode 19" app/build.gradle
+          grep -q "versionName '2.7.0'" app/build.gradle
           grep -q "androidx.recyclerview:recyclerview:1.3.2" app/build.gradle
           ! grep -q "play-services-auth" app/build.gradle
           ! test -e app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
-          grep -q "RecyclerView" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "GridLayoutManager" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "libraryColumns" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "WoW Reader" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "https://t.me/TheBookR" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "https://t.me/+rUiqzi2mdhNiNGZl" app/src/main/java/com/whisper/wowreader/MainActivity.java
-          grep -q "https://whispermmepub.github.io/Review/" app/src/main/java/com/whisper/wowreader/MainActivity.java
+          MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q "RecyclerView" "$MAIN"
+          grep -q "GridLayoutManager" "$MAIN"
+          grep -q "libraryColumns" "$MAIN"
+          grep -q "Typeface.createFromAsset(getAssets(), \"fonts/pyidaungsu_native.ttf\")" "$MAIN"
+          grep -q "Collator.getInstance(new Locale(\"my\", \"MM\"))" "$MAIN"
+          grep -q "library_sort" "$MAIN"
+          grep -q "Recently added" "$MAIN"
+          grep -q "Recently opened" "$MAIN"
+          grep -q "Title · က–အ / A–Z" "$MAIN"
+          grep -q "warmSortMetadataIfNeeded" "$MAIN"
+          grep -q "Added to Library" "$MAIN"
+          grep -q "importBook(data,false)" "$MAIN"
+          ! grep -q "if(openAfter)openBook" "$MAIN"
+          grep -q "https://t.me/TheBookR" "$MAIN"
+          grep -q "https://t.me/+rUiqzi2mdhNiNGZl" "$MAIN"
+          grep -q "https://whispermmepub.github.io/Review/" "$MAIN"
           grep -q "ReaderAnnotationStore.add" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q "installSelectionWatcher" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q "REQ_IMPORT_FONT" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
@@ -78,6 +89,7 @@ jobs:
           grep -q "paperGestureChapterBoundary" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q "finishInteractiveChapterBoundary" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q "3D page curl" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          git diff --check
 
       - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
@@ -93,14 +105,15 @@ jobs:
           test -s "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='18'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.6.0'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='19'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.7.0'"
           "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          unzip -l "$APK" | grep -q 'assets/fonts/pyidaungsu_native.ttf'
 
       - name: Collect APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.6.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.7.0-unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
@@ -108,9 +121,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.6.0
+          name: WoW-Reader-v2.7.0
           path: |
-            WoW-Reader-v2.6.0-unsigned.apk
+            WoW-Reader-v2.7.0-unsigned.apk
             apksigner.jar
           if-no-files-found: error
           retention-days: 14
