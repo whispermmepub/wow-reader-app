@@ -84,8 +84,10 @@ jobs:
           grep -q "LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES" "$READER"
           grep -q "setStatusBarColor(Color.TRANSPARENT)" "$READER"
           grep -q "setNavigationBarColor(Color.TRANSPARENT)" "$READER"
-          grep -q "onWindowFocusChanged" "$READER"
-          grep -q "protected void onResume" "$READER"
+          test "$(grep -c 'public void onWindowFocusChanged' "$READER")" -eq 1
+          test "$(grep -c 'protected void onResume' "$READER")" -eq 1
+          grep -q "postDelayed(this::enterImmersive, 55L)" "$READER"
+          grep -q "postDelayed(this::enterImmersive, 80L)" "$READER"
           grep -q "ReaderAnnotationStore.add" "$READER"
           grep -q "MESH_W = 60" "$CURL"
           git diff --check
