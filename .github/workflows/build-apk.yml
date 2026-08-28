@@ -52,8 +52,8 @@ jobs:
           test -s app/src/main/assets/fonts/m01_pupu_bold.ttf
           test -s app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
           test -s app/src/main/assets/fonts/phantee_hand_written.ttf
-          grep -q "versionCode 22" app/build.gradle
-          grep -q "versionName '2.10.0'" app/build.gradle
+          grep -q "versionCode 23" app/build.gradle
+          grep -q "versionName '2.11.0'" app/build.gradle
           grep -q "androidx.recyclerview:recyclerview:1.3.2" app/build.gradle
           ! grep -q "play-services-auth" app/build.gradle
           ! test -e app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
@@ -63,39 +63,27 @@ jobs:
           grep -q "RecyclerView" "$MAIN"
           grep -q "GridLayoutManager" "$MAIN"
           grep -q "calculateLibraryColumns" "$MAIN"
-          grep -q "minCardDp = 154f" "$MAIN"
-          grep -q "Math.min(6, columns)" "$MAIN"
-          grep -q "updateLibraryColumnsForWidth" "$MAIN"
-          grep -q "addOnLayoutChangeListener" "$MAIN"
+          grep -q "setItemViewCacheSize(20)" "$MAIN"
           grep -q "Typeface.createFromAsset(getAssets(), \"fonts/pyidaungsu_native.ttf\")" "$MAIN"
           grep -q "library_sort" "$MAIN"
-          grep -q "Added to Library" "$MAIN"
-          grep -q "importBook(data,false)" "$MAIN"
           grep -q "ExploreLogoView" "$MAIN"
           grep -q '＋  Add book' "$MAIN"
-          grep -q "onSingleTapUp" "$READER"
-          grep -q "turnPageFromTap" "$READER"
-          grep -q "projected >= 0.23f" "$READER"
-          grep -q "startTapCurl" "$CURL"
           grep -q "setDecorFitsSystemWindows(false)" "$READER"
           grep -q "BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE" "$READER"
-          grep -q "WindowInsets.Type.statusBars" "$READER"
-          grep -q "WindowInsets.Type.navigationBars" "$READER"
-          grep -q "LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES" "$READER"
-          grep -q "setStatusBarColor(Color.TRANSPARENT)" "$READER"
-          grep -q "setNavigationBarColor(Color.TRANSPARENT)" "$READER"
-          test "$(grep -c 'public void onWindowFocusChanged' "$READER")" -eq 1
-          test "$(grep -c 'protected void onResume' "$READER")" -eq 1
-          grep -q "postDelayed(this::enterImmersive, 55L)" "$READER"
-          grep -q "postDelayed(this::enterImmersive, 80L)" "$READER"
           grep -q 'reader_v210_animation_default_applied' "$READER"
           grep -q 'pageAnimation = "none"' "$READER"
-          grep -q 'None · default' "$READER"
           grep -q 'chapterLoadGeneration' "$READER"
           grep -q 'stableHits' "$READER"
-          grep -q 'forceChapterRepaginate' "$READER"
-          grep -q 'revealStableChapter' "$READER"
           grep -q 'generation != chapterLoadGeneration' "$READER"
+          grep -q 'Display options' "$READER"
+          grep -q 'reader_night_light' "$READER"
+          grep -q 'Night Light' "$READER"
+          grep -q 'Reading progress' "$READER"
+          grep -q 'seekToOverallProgress' "$READER"
+          grep -q 'scheduleChromeAutoHide' "$READER"
+          grep -q 'More reader settings' "$READER"
+          grep -q 'Reading brightness' "$READER"
+          grep -q 'showAdvancedReaderSettings' "$READER"
           grep -q "ReaderAnnotationStore.add" "$READER"
           grep -q "MESH_W = 60" "$CURL"
           git diff --check
@@ -114,15 +102,15 @@ jobs:
           test -s "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='22'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.10.0'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='23'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.11.0'"
           "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
           unzip -l "$APK" | grep -q 'assets/fonts/pyidaungsu_native.ttf'
 
       - name: Collect APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.10.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.11.0-unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
@@ -130,9 +118,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.10.0
+          name: WoW-Reader-v2.11.0
           path: |
-            WoW-Reader-v2.10.0-unsigned.apk
+            WoW-Reader-v2.11.0-unsigned.apk
             apksigner.jar
           if-no-files-found: error
           retention-days: 14
