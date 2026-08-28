@@ -151,11 +151,16 @@ final class PageCurlView extends View {
         animator.start();
     }
 
-    void startCurl(Bitmap target, int direction, Runnable completion) {
-        beginInteractive(target, direction, 0f, 0.5f);
-        // Tap-to-turn still uses the same 3D renderer; it just receives a synthetic flick.
-        float syntheticVelocity = (direction < 0 ? 1f : -1f) * Math.max(1500f, getWidth() * 2.2f);
+    void startTapCurl(Bitmap target, int direction, float touchY, Runnable completion) {
+        // Edge taps use the exact same page mesh as finger drags. Starting a hair inside
+        // the edge makes the first rendered frame visibly curl instead of looking like a cut.
+        beginInteractive(target, direction, 0.012f, clamp(touchY, 0.10f, 0.90f));
+        float syntheticVelocity = (direction < 0 ? 1f : -1f) * Math.max(1250f, getWidth() * 1.55f);
         settleInteractive(true, syntheticVelocity, completion);
+    }
+
+    void startCurl(Bitmap target, int direction, Runnable completion) {
+        startTapCurl(target, direction, 0.5f, completion);
     }
 
     void release() {

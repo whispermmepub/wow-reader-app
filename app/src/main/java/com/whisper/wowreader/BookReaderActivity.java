@@ -377,7 +377,8 @@ public class BookReaderActivity extends Activity {
         readerTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) { return true; }
 
-            @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+            @Override public boolean onSingleTapUp(MotionEvent e) {
+                // Immediate edge tap: do not wait for the double-tap timeout.
                 handleReaderTap(e.getX(), e.getY());
                 return true;
             }
@@ -469,8 +470,8 @@ public class BookReaderActivity extends Activity {
                 if (result != null && (result.contains("link") || result.contains("selection"))) return;
 
                 if ("page".equals(readingMode)) {
-                    if (ratio < 0.30f) turnPage(-1);
-                    else if (ratio > 0.70f) turnPage(1);
+                    if (ratio < 0.34f) turnPageFromTap(-1, y);
+                    else if (ratio > 0.66f) turnPageFromTap(1, y);
                     else toggleControls();
                 } else {
                     if (ratio < 0.24f) navigateChapter(-1, true);
@@ -1430,7 +1431,7 @@ public class BookReaderActivity extends Activity {
             }
 
             float width = Math.max(1f, webView.getWidth());
-            paperProgress = Math.max(0f, Math.min(1f, Math.abs(dx) / (width * 0.965f)));
+            paperProgress = Math.max(0f, Math.min(1f, Math.abs(dx) / (width * 0.90f)));
             paperTouchY = webView.getHeight() <= 0 ? 0.5f :
                     Math.max(0.07f, Math.min(0.93f, event.getY() / (float) webView.getHeight()));
             if (paperGestureReady && pageCurlView != null)
@@ -1454,7 +1455,7 @@ public class BookReaderActivity extends Activity {
             float towardTurn = (-paperGestureDirection * velocityX) / width;
             float projected = paperProgress + towardTurn * 0.13f;
             boolean commit = action != MotionEvent.ACTION_CANCEL &&
-                    (projected >= 0.37f || towardTurn > 0.52f);
+                    (projected >= 0.23f || towardTurn > 0.32f);
 
             paperGestureCommit = commit;
             paperGestureReleased = true;
@@ -1693,6 +1694,62 @@ public class BookReaderActivity extends Activity {
         if (webView != null) webView.setLongClickable(true);
     }
 
+
+    private void turnPageFromTap(int delta, float tapY) {
+        if (webView == null || chapterLoading || !"page".equals(readingMode) || delta == 0) return;
+        long now = System.currentTimeMillis();
+        if (pageTurnLocked || now - lastPageTurnMs < 135L) return;
+
+        lastPageTurnMs = now;
+        int direction = delta < 0 ? -1 : 1;
+        int targetPage = currentPageInChapter + direction;
+        boolean insideChapter = targetPage >= 1 && targetPage <= pageCountInChapter;
+        if (!insideChapter) {
+            navigateChapter(direction, direction < 0);
+            return;
+        }
+        if ("paper".equals(pageAnimation) && pageCurlView != null) {
+            float touch = webView.getHeight() <= 0 ? 0.5f : Math.max(0.12f, Math.min(0.88f, tapY / (float) webView.getHeight()));
+            startNativeTapCurl(direction, targetPage - 1, touch);
+        } else {
+            performJsPageTurn(direction);
+        }
+    }
+
+    private void startNativeTapCurl(int direction, int targetZeroBased, float touchY) {
+        Bitmap current = captureWebViewBitmap();
+        if (current == null || pageCurlView == null) {
+            performJsPageTurn(direction);
+            return;
+        }
+        pageTurnLocked = true;
+        pageCurlView.hold(current);
+        String jump = "(function(){var st=window.__wowPageEngine;if(!st||st.mode!=='page')return 'unavailable';" +
+                "st.locked=true;st.page=st.clamp(" + targetZeroBased + ",0,(st.count||1)-1);st.apply(false);return 'ok';})()";
+        try {
+            webView.evaluateJavascript(jump, result -> {
+                if (result == null || result.contains("unavailable")) {
+                    pageCurlView.release();
+                    pageTurnLocked = false;
+                    performJsPageTurn(direction);
+                    return;
+                }
+                webView.postOnAnimation(() -> webView.postOnAnimation(() -> {
+                    Bitmap target = captureWebViewBitmap();
+                    if (target == null || pageCurlView == null) {
+                        if (pageCurlView != null) pageCurlView.release();
+                        finishNativePageCurl();
+                        return;
+                    }
+                    pageCurlView.startTapCurl(target, direction, touchY, this::finishNativePageCurl);
+                }));
+            });
+        } catch (Exception e) {
+            if (pageCurlView != null) pageCurlView.release();
+            pageTurnLocked = false;
+            performJsPageTurn(direction);
+        }
+    }
 
     private void turnPage(int delta) {
         if (webView == null || chapterLoading || !"page".equals(readingMode) || delta == 0) return;

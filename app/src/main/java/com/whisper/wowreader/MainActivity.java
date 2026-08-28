@@ -11,6 +11,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfRenderer;
@@ -124,26 +125,49 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         floatingAdd = new TextView(this);
-        floatingAdd.setText("＋");
-        floatingAdd.setTextSize(30);
+        floatingAdd.setText("＋  Add book");
+        floatingAdd.setTextSize(14.5f);
+        floatingAdd.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         floatingAdd.setTextColor(Color.WHITE);
         floatingAdd.setGravity(Gravity.CENTER);
+        floatingAdd.setPadding(dp(14), 0, dp(16), 0);
         floatingAdd.setContentDescription("Add book");
-        floatingAdd.setBackground(roundRect(Color.rgb(82, 82, 214), dp(28), 0, 0));
-        floatingAdd.setElevation(dp(10));
-        floatingAdd.setOnClickListener(v -> chooseBook());
-        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END | Gravity.BOTTOM);
-        fabLp.rightMargin = dp(18);
-        fabLp.bottomMargin = dp(22);
+        floatingAdd.setBackground(gradientRoundRect(new int[]{
+                Color.rgb(92, 76, 226), Color.rgb(71, 113, 236)}, dp(29)));
+        floatingAdd.setElevation(dp(11));
+        floatingAdd.setOnClickListener(v -> {
+            try { v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch (Exception ignored) {}
+            chooseBook();
+        });
+        floatingAdd.setOnTouchListener((v, e) -> {
+            int action = e.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN) {
+                v.animate().cancel();
+                v.animate().scaleX(0.955f).scaleY(0.955f).translationY(dp(1)).setDuration(72L).start();
+                v.setElevation(dp(7));
+            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                v.animate().cancel();
+                v.animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(185L)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(1.18f)).start();
+                v.setElevation(dp(11));
+            }
+            return false;
+        });
+        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(dp(124), dp(58), Gravity.END | Gravity.BOTTOM);
+        fabLp.rightMargin = dp(16);
+        fabLp.bottomMargin = dp(20);
         root.addView(floatingAdd, fabLp);
 
         libraryRecycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
                 if (floatingAdd == null) return;
+                floatingAdd.animate().cancel();
                 if (dy > dp(2) && recyclerView.canScrollVertically(-1)) {
-                    floatingAdd.animate().translationY(dp(86)).alpha(0.16f).setDuration(180L).start();
+                    floatingAdd.animate().translationY(dp(88)).alpha(0f).setDuration(165L)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
                 } else if (dy < -dp(2) || !recyclerView.canScrollVertically(-1)) {
-                    floatingAdd.animate().translationY(0f).alpha(1f).setDuration(180L).start();
+                    floatingAdd.animate().translationY(0f).alpha(1f).setDuration(210L)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator(1.35f)).start();
                 }
             }
         });
@@ -187,10 +211,10 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         String[][] data = {
-                {"T", "Telegram", "New books", "https://t.me/TheBookR"},
-                {"D", "Discussion", "Reader community", "https://t.me/+rUiqzi2mdhNiNGZl"},
-                {"W", "Book Website", "saroatsin.com", "https://saroatsin.com"},
-                {"R", "Book Reviews", "အညွှန်း & review", "https://whispermmepub.github.io/Review/"}
+                {"telegram", "Telegram", "New books", "https://t.me/TheBookR"},
+                {"discussion", "Discussion", "Reader community", "https://t.me/+rUiqzi2mdhNiNGZl"},
+                {"website", "Book Website", "saroatsin.com", "https://saroatsin.com"},
+                {"review", "Book Reviews", "အညွှန်း & review", "https://whispermmepub.github.io/Review/"}
         };
         int[] colors = {
                 Color.rgb(232, 245, 255), Color.rgb(239, 238, 255),
@@ -206,7 +230,7 @@ public class MainActivity extends Activity {
     }
 
 
-    private View discoveryCard(String letter, String title, String subtitle, int background, String url) {
+    private View discoveryCard(String kind, String title, String subtitle, int background, String url) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
@@ -223,14 +247,8 @@ public class MainActivity extends Activity {
             return false;
         });
 
-        TextView badge = new TextView(this);
-        badge.setText(letter);
-        badge.setTextSize(14);
-        badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        badge.setTextColor(Color.rgb(55, 60, 72));
-        badge.setGravity(Gravity.CENTER);
-        badge.setBackground(roundRect(Color.argb(185, 255, 255, 255), dp(18), 0, 0));
-        card.addView(badge, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        ExploreLogoView badge = new ExploreLogoView(this, kind);
+        card.addView(badge, new LinearLayout.LayoutParams(dp(42), dp(42)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -467,6 +485,18 @@ public class MainActivity extends Activity {
         card.setElevation(dp(1));
         card.setOnClickListener(v -> openBook(file));
         card.setOnLongClickListener(v -> { confirmDelete(file); return true; });
+        card.setOnTouchListener((v, e) -> {
+            int action = e.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN) {
+                v.animate().cancel();
+                v.animate().scaleX(0.986f).scaleY(0.986f).setDuration(65L).start();
+            } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                v.animate().cancel();
+                v.animate().scaleX(1f).scaleY(1f).setDuration(145L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            }
+            return false;
+        });
 
         ImageView cover = new ImageView(this);
         cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -853,5 +883,91 @@ public class MainActivity extends Activity {
     private String stripExtension(String name){int dot=name.lastIndexOf('.');return dot>0?name.substring(0,dot):name;}
     private int colorForName(String name){int[] colors={Color.rgb(96,74,139),Color.rgb(55,102,136),Color.rgb(151,78,74),Color.rgb(76,111,82),Color.rgb(130,89,55)};return colors[Math.abs(name==null?0:name.hashCode())%colors.length];}
     private GradientDrawable roundRect(int color,float radius,int strokeWidth,int strokeColor){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(radius);if(strokeWidth>0)g.setStroke(strokeWidth,strokeColor);return g;}
+    private final class ExploreLogoView extends View {
+        private final String kind;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+
+        ExploreLogoView(android.content.Context context, String kind) {
+            super(context);
+            this.kind = kind == null ? "website" : kind;
+            setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            float w = getWidth(), h = getHeight();
+            float cx = w * .5f, cy = h * .5f, r = Math.min(w, h) * .47f;
+            if ("telegram".equals(kind) || "discussion".equals(kind)) drawTelegram(c, cx, cy, r);
+            else if ("review".equals(kind)) drawReview(c, cx, cy, r);
+            else drawWebsite(c, cx, cy, r);
+        }
+
+        private void drawTelegram(Canvas c, float cx, float cy, float r) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(42, 171, 238));
+            c.drawCircle(cx, cy, r, p);
+            path.reset();
+            path.moveTo(cx - r * .57f, cy - r * .03f);
+            path.lineTo(cx + r * .61f, cy - r * .49f);
+            path.lineTo(cx + r * .28f, cy + r * .58f);
+            path.lineTo(cx - r * .08f, cy + r * .27f);
+            path.lineTo(cx - r * .31f, cy + r * .43f);
+            path.lineTo(cx - r * .22f, cy + r * .13f);
+            path.close();
+            p.setColor(Color.WHITE);
+            c.drawPath(path, p);
+            p.setColor(Color.argb(88, 15, 105, 160));
+            path.reset();
+            path.moveTo(cx - r * .22f, cy + r * .13f);
+            path.lineTo(cx + r * .39f, cy - r * .31f);
+            path.lineTo(cx - r * .08f, cy + r * .27f);
+            path.close();
+            c.drawPath(path, p);
+            if ("discussion".equals(kind)) {
+                p.setColor(Color.WHITE);
+                c.drawCircle(cx + r * .48f, cy + r * .47f, r * .24f, p);
+                p.setColor(Color.rgb(74, 112, 226));
+                c.drawCircle(cx + r * .48f, cy + r * .47f, r * .16f, p);
+                p.setColor(Color.WHITE);
+                c.drawCircle(cx + r * .43f, cy + r * .45f, r * .025f, p);
+                c.drawCircle(cx + r * .50f, cy + r * .45f, r * .025f, p);
+                c.drawCircle(cx + r * .57f, cy + r * .45f, r * .025f, p);
+            }
+        }
+
+        private void drawWebsite(Canvas c, float cx, float cy, float r) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(39, 166, 124));
+            c.drawCircle(cx, cy, r, p);
+            stroke.setColor(Color.WHITE);
+            stroke.setStrokeWidth(Math.max(1.6f, r * .10f));
+            c.drawCircle(cx, cy, r * .58f, stroke);
+            c.drawLine(cx - r * .55f, cy, cx + r * .55f, cy, stroke);
+            c.drawOval(cx - r * .28f, cy - r * .58f, cx + r * .28f, cy + r * .58f, stroke);
+        }
+
+        private void drawReview(Canvas c, float cx, float cy, float r) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(239, 133, 72));
+            c.drawCircle(cx, cy, r, p);
+            p.setColor(Color.WHITE);
+            float left = cx - r * .52f, top = cy - r * .45f, right = cx + r * .45f, bottom = cy + r * .49f;
+            c.drawRoundRect(left, top, right, bottom, r * .10f, r * .10f, p);
+            p.setColor(Color.rgb(239, 133, 72));
+            c.drawRect(cx - r * .07f, top + r * .09f, cx + r * .01f, bottom - r * .08f, p);
+            stroke.setColor(Color.rgb(239, 133, 72));
+            stroke.setStrokeWidth(Math.max(1.4f, r * .075f));
+            c.drawLine(left + r * .13f, cy - r * .12f, cx - r * .16f, cy - r * .12f, stroke);
+            c.drawLine(cx + r * .10f, cy - r * .12f, right - r * .12f, cy - r * .12f, stroke);
+            c.drawLine(left + r * .13f, cy + r * .13f, cx - r * .16f, cy + r * .13f, stroke);
+            c.drawLine(cx + r * .10f, cy + r * .13f, right - r * .12f, cy + r * .13f, stroke);
+        }
+    }
+
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
 }
