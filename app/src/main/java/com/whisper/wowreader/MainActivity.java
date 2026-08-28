@@ -24,6 +24,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -40,6 +42,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
 public class MainActivity extends Activity {
     private static final int REQ_IMPORT = 1001;
     private static final int REQ_BACKUP = 1002;
@@ -47,6 +52,12 @@ public class MainActivity extends Activity {
     private File libraryDir;
     private File coverCacheDir;
     private LinearLayout booksContainer;
+    private RecyclerView libraryRecycler;
+    private LibraryAdapter libraryAdapter;
+    private final List<File> visibleBooks = new ArrayList<>();
+    private EditText searchInput;
+    private TextView floatingAdd;
+    private int libraryColumns = 2;
     private TextView countView;
     private TextView viewModeButton;
     private SharedPreferences prefs;
@@ -55,8 +66,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.WHITE);
-        getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().setStatusBarColor(Color.rgb(247, 248, 251));
+        getWindow().setNavigationBarColor(Color.rgb(247, 248, 251));
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         libraryDir = new File(getFilesDir(), "library");
         coverCacheDir = new File(getFilesDir(), "cover_cache");
@@ -69,109 +80,154 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); handleIncomingIntent(intent); }
-    @Override protected void onResume() { super.onResume(); if (booksContainer != null) refreshLibrary(); }
+    @Override protected void onResume() { super.onResume(); if (libraryRecycler != null) refreshLibrary(); }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.WHITE);
-        LinearLayout top = new LinearLayout(this); top.setOrientation(LinearLayout.HORIZONTAL); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(20), dp(10), dp(10), dp(6));
-        TextView brand = new TextView(this); brand.setText("Library"); brand.setTextSize(28); brand.setTextColor(Color.rgb(32,33,36)); brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        top.addView(brand, new LinearLayout.LayoutParams(0, dp(54), 1));
-        TextView cloud = iconButton("☁"); cloud.setContentDescription("Cloud backup"); cloud.setOnClickListener(v -> showCloudMenu()); top.addView(cloud, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        viewModeButton = iconButton(gridMode ? "☷" : "▦"); viewModeButton.setContentDescription("Change library view");
-        viewModeButton.setOnClickListener(v -> { gridMode = !gridMode; prefs.edit().putBoolean("library_grid", gridMode).apply(); viewModeButton.setText(gridMode ? "☷" : "▦"); refreshLibrary(); });
-        top.addView(viewModeButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView add = iconButton("＋"); add.setTextSize(28); add.setContentDescription("Add book"); add.setOnClickListener(v -> chooseBook()); top.addView(add, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        root.addView(top);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(247, 248, 251));
 
-        EditText search = new EditText(this); search.setSingleLine(true); search.setHint("Search your library"); search.setTextSize(16); search.setTextColor(Color.rgb(32,33,36)); search.setHintTextColor(Color.rgb(112,117,122)); search.setPadding(dp(18),0,dp(18),0); search.setBackground(roundRect(Color.rgb(245,247,250), dp(24),0,0));
-        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)); searchLp.leftMargin=dp(16); searchLp.rightMargin=dp(16); searchLp.topMargin=dp(4); searchLp.bottomMargin=dp(8); root.addView(search, searchLp);
-        search.addTextChangedListener(new TextWatcher() { @Override public void beforeTextChanged(CharSequence s,int start,int count,int after){} @Override public void onTextChanged(CharSequence s,int start,int before,int count){ searchQuery=s.toString().trim().toLowerCase(Locale.ROOT); refreshLibrary(); } @Override public void afterTextChanged(Editable s){} });
+        libraryRecycler = new RecyclerView(this);
+        libraryRecycler.setBackgroundColor(Color.TRANSPARENT);
+        libraryRecycler.setClipToPadding(false);
+        libraryRecycler.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        libraryRecycler.setItemAnimator(null);
+        libraryRecycler.setPadding(0, 0, 0, dp(96));
 
-        addDiscoverySection(root);
+        libraryAdapter = new LibraryAdapter();
+        configureLibraryLayout();
+        libraryRecycler.setAdapter(libraryAdapter);
+        root.addView(libraryRecycler, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout section = new LinearLayout(this); section.setGravity(Gravity.CENTER_VERTICAL); section.setPadding(dp(20),dp(10),dp(20),dp(6));
-        TextView label = new TextView(this); label.setText("Your books"); label.setTextSize(18); label.setTextColor(Color.rgb(32,33,36)); label.setTypeface(Typeface.DEFAULT, Typeface.BOLD); section.addView(label,new LinearLayout.LayoutParams(0,dp(40),1));
-        countView = new TextView(this); countView.setTextSize(13); countView.setTextColor(Color.rgb(95,99,104)); countView.setGravity(Gravity.CENTER_VERTICAL|Gravity.END); section.addView(countView,new LinearLayout.LayoutParams(dp(100),dp(40))); root.addView(section);
+        floatingAdd = new TextView(this);
+        floatingAdd.setText("＋");
+        floatingAdd.setTextSize(30);
+        floatingAdd.setTextColor(Color.WHITE);
+        floatingAdd.setGravity(Gravity.CENTER);
+        floatingAdd.setContentDescription("Add book");
+        floatingAdd.setBackground(roundRect(Color.rgb(82, 82, 214), dp(28), 0, 0));
+        floatingAdd.setElevation(dp(10));
+        floatingAdd.setOnClickListener(v -> chooseBook());
+        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(dp(58), dp(58), Gravity.END | Gravity.BOTTOM);
+        fabLp.rightMargin = dp(18);
+        fabLp.bottomMargin = dp(22);
+        root.addView(floatingAdd, fabLp);
 
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); booksContainer = new LinearLayout(this); booksContainer.setOrientation(LinearLayout.VERTICAL); booksContainer.setPadding(dp(14),dp(2),dp(14),dp(32)); scroll.addView(booksContainer,new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT)); root.addView(scroll,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
-        setContentView(root); refreshLibrary();
+        libraryRecycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                if (floatingAdd == null) return;
+                if (dy > dp(2) && recyclerView.canScrollVertically(-1)) {
+                    floatingAdd.animate().translationY(dp(86)).alpha(0.16f).setDuration(180L).start();
+                } else if (dy < -dp(2) || !recyclerView.canScrollVertically(-1)) {
+                    floatingAdd.animate().translationY(0f).alpha(1f).setDuration(180L).start();
+                }
+            }
+        });
+
+        setContentView(root);
+        refreshLibrary();
     }
 
-    private TextView iconButton(String text) { TextView v=new TextView(this); v.setText(text); v.setTextSize(22); v.setTextColor(Color.rgb(70,71,75)); v.setGravity(Gravity.CENTER); v.setBackground(roundRect(Color.TRANSPARENT,dp(24),0,0)); v.setClickable(true); return v; }
+
+    private TextView iconButton(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(20);
+        v.setTextColor(Color.rgb(52, 55, 62));
+        v.setGravity(Gravity.CENTER);
+        v.setBackground(roundRect(Color.argb(188, 255, 255, 255), dp(22), dp(1), Color.argb(80, 210, 214, 222)));
+        v.setClickable(true);
+        v.setElevation(dp(1));
+        return v;
+    }
+
 
     private void addDiscoverySection(LinearLayout root) {
         TextView heading = new TextView(this);
-        heading.setText("Discover & community");
-        heading.setTextSize(15);
-        heading.setTextColor(Color.rgb(60, 64, 67));
+        heading.setText("Explore");
+        heading.setTextSize(14);
+        heading.setTextColor(Color.rgb(74, 78, 88));
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
-        hlp.leftMargin = dp(20); hlp.rightMargin = dp(20); hlp.topMargin = dp(2);
-        root.addView(heading, hlp);
+        heading.setPadding(dp(2), dp(12), dp(2), dp(8));
+        root.addView(heading, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout row1 = new LinearLayout(this);
-        row1.setOrientation(LinearLayout.HORIZONTAL);
-        row1.setPadding(dp(16), 0, dp(16), 0);
-        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(72), 1f);
-        left.rightMargin = dp(6);
-        row1.addView(discoveryCard("T", "Telegram Channel", "New books", Color.rgb(229, 244, 253), "https://t.me/TheBookR"), left);
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(72), 1f);
-        right.leftMargin = dp(6);
-        row1.addView(discoveryCard("D", "Discussion", "Reader community", Color.rgb(238, 240, 255), "https://t.me/+rUiqzi2mdhNiNGZl"), right);
-        root.addView(row1, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76)));
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setFillViewport(false);
+        scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setPadding(dp(1), 0, dp(12), dp(2));
+        scroller.addView(strip, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout row2 = new LinearLayout(this);
-        row2.setOrientation(LinearLayout.HORIZONTAL);
-        row2.setPadding(dp(16), 0, dp(16), 0);
-        LinearLayout.LayoutParams left2 = new LinearLayout.LayoutParams(0, dp(72), 1f);
-        left2.rightMargin = dp(6);
-        row2.addView(discoveryCard("W", "Book Website", "saroatsin.com", Color.rgb(239, 247, 240), "https://saroatsin.com"), left2);
-        LinearLayout.LayoutParams right2 = new LinearLayout.LayoutParams(0, dp(72), 1f);
-        right2.leftMargin = dp(6);
-        row2.addView(discoveryCard("R", "Book Reviews", "အညွှန်း & review", Color.rgb(253, 242, 232), "https://whispermmepub.github.io/Review/"), right2);
-        LinearLayout.LayoutParams row2lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(78));
-        row2lp.bottomMargin = dp(3);
-        root.addView(row2, row2lp);
+        String[][] data = {
+                {"T", "Telegram", "New books", "https://t.me/TheBookR"},
+                {"D", "Discussion", "Reader community", "https://t.me/+rUiqzi2mdhNiNGZl"},
+                {"W", "Book Website", "saroatsin.com", "https://saroatsin.com"},
+                {"R", "Book Reviews", "အညွှန်း & review", "https://whispermmepub.github.io/Review/"}
+        };
+        int[] colors = {
+                Color.rgb(232, 245, 255), Color.rgb(239, 238, 255),
+                Color.rgb(235, 247, 239), Color.rgb(255, 241, 232)
+        };
+        for (int i = 0; i < data.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(154), dp(74));
+            if (i > 0) lp.leftMargin = dp(10);
+            strip.addView(discoveryCard(data[i][0], data[i][1], data[i][2], colors[i], data[i][3]), lp);
+        }
+        root.addView(scroller, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(78)));
     }
+
 
     private View discoveryCard(String letter, String title, String subtitle, int background, String url) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(10), dp(8), dp(8), dp(8));
-        card.setBackground(roundRect(background, dp(14), 0, 0));
+        card.setPadding(dp(10), dp(9), dp(8), dp(9));
+        card.setBackground(roundRect(background, dp(18), dp(1), Color.argb(46, 80, 88, 105)));
         card.setClickable(true);
         card.setElevation(dp(1));
         card.setOnClickListener(v -> openExternal(url));
+        card.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
+                v.animate().scaleX(0.975f).scaleY(0.975f).setDuration(80L).start();
+            else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP || e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL)
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120L).start();
+            return false;
+        });
 
         TextView badge = new TextView(this);
         badge.setText(letter);
-        badge.setTextSize(16);
+        badge.setTextSize(14);
         badge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        badge.setTextColor(Color.rgb(45, 55, 65));
+        badge.setTextColor(Color.rgb(55, 60, 72));
         badge.setGravity(Gravity.CENTER);
-        badge.setBackground(roundRect(Color.argb(155, 255, 255, 255), dp(20), 0, 0));
-        card.addView(badge, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        badge.setBackground(roundRect(Color.argb(185, 255, 255, 255), dp(18), 0, 0));
+        card.addView(badge, new LinearLayout.LayoutParams(dp(38), dp(38)));
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
-        copy.setPadding(dp(9), 0, dp(1), 0);
+        copy.setPadding(dp(9), 0, 0, 0);
         TextView t = new TextView(this);
         t.setText(title);
-        t.setTextSize(13);
+        t.setTextSize(12.5f);
         t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        t.setTextColor(Color.rgb(32, 33, 36));
+        t.setTextColor(Color.rgb(35, 38, 45));
         t.setMaxLines(1);
         TextView sub = new TextView(this);
         sub.setText(subtitle);
-        sub.setTextSize(10);
-        sub.setTextColor(Color.rgb(95, 99, 104));
+        sub.setTextSize(9.5f);
+        sub.setTextColor(Color.rgb(99, 104, 116));
         sub.setMaxLines(1);
         copy.addView(t);
         copy.addView(sub);
         card.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         return card;
     }
+
 
     private void openExternal(String url) {
         try {
@@ -182,35 +238,340 @@ public class MainActivity extends Activity {
     }
 
     private void refreshLibrary() {
-        booksContainer.removeAllViews();
-        File[] all=libraryDir.listFiles(file -> file.isFile() && isBook(file.getName())); if(all==null) all=new File[0]; Arrays.sort(all, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-        List<File> files=new ArrayList<>(); for(File f:all) if(searchQuery.isEmpty()||stripExtension(f.getName()).toLowerCase(Locale.ROOT).contains(searchQuery)) files.add(f);
-        countView.setText(files.size()+(files.size()==1?" book":" books"));
-        if(files.isEmpty()){ TextView empty=new TextView(this); empty.setText(searchQuery.isEmpty()?"Your library is empty\n\nTap ＋ to add an EPUB or PDF.":"No books found"); empty.setTextSize(17); empty.setTextColor(Color.rgb(95,99,104)); empty.setGravity(Gravity.CENTER); empty.setPadding(dp(20),dp(100),dp(20),dp(60)); booksContainer.addView(empty,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT)); return; }
-        if(gridMode) addGrid(files); else for(File f:files) booksContainer.addView(createListCard(f));
+        File[] all = libraryDir.listFiles(file -> file.isFile() && isBook(file.getName()));
+        if (all == null) all = new File[0];
+        Arrays.sort(all, (a, b) -> {
+            long aa = prefs.getLong("last_opened_" + a.getName(), a.lastModified());
+            long bb = prefs.getLong("last_opened_" + b.getName(), b.lastModified());
+            return Long.compare(bb, aa);
+        });
+        visibleBooks.clear();
+        for (File f : all) {
+            if (searchQuery.isEmpty() || stripExtension(f.getName()).toLowerCase(Locale.ROOT).contains(searchQuery))
+                visibleBooks.add(f);
+        }
+        if (libraryAdapter != null) libraryAdapter.submit(visibleBooks);
+        if (countView != null) countView.setText(visibleBooks.size() + (visibleBooks.size() == 1 ? " book" : " books"));
     }
+
 
     private void addGrid(List<File> files) {
-        int screen=getResources().getDisplayMetrics().widthPixels, gap=dp(10), padding=dp(28), cellWidth=Math.max(dp(100),(screen-padding-gap*2)/3);
-        for(int i=0;i<files.size();i+=3){ LinearLayout row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.TOP);
-            for(int j=0;j<3;j++){ int idx=i+j; LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(cellWidth,ViewGroup.LayoutParams.WRAP_CONTENT); if(j>0) lp.leftMargin=gap; if(idx<files.size()) row.addView(createGridCard(files.get(idx),cellWidth),lp); else row.addView(new View(this),lp); }
-            LinearLayout.LayoutParams rlp=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT); rlp.bottomMargin=dp(18); booksContainer.addView(row,rlp); }
+        // Retained for binary/source compatibility. The v2.6 library uses RecyclerView.
+        if (libraryAdapter != null) libraryAdapter.submit(files);
     }
 
-    private View createGridCard(File file,int cellWidth){
-        LinearLayout cell=new LinearLayout(this); cell.setOrientation(LinearLayout.VERTICAL); cell.setClickable(true); cell.setOnClickListener(v->openBook(file)); cell.setOnLongClickListener(v->{confirmDelete(file);return true;});
-        int coverHeight=Math.round(cellWidth*1.46f); ImageView cover=new ImageView(this); cover.setScaleType(ImageView.ScaleType.CENTER_CROP); String initial=stripExtension(file.getName()); cover.setImageBitmap(placeholderBitmap(initial,Math.max(180,cellWidth),Math.max(260,coverHeight))); cover.setBackground(roundRect(Color.rgb(232,234,237),dp(8),0,0)); cover.setClipToOutline(true); cover.setElevation(dp(2)); cell.addView(cover,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,coverHeight));
-        TextView title=new TextView(this); title.setText(initial); title.setTextSize(14); title.setTextColor(Color.rgb(32,33,36)); title.setTypeface(Typeface.DEFAULT,Typeface.BOLD); title.setMaxLines(2); title.setPadding(dp(2),dp(8),dp(2),0); cell.addView(title);
-        TextView author=new TextView(this); int progress=prefs.getInt("percent_"+file.getName(),0); author.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB")+" · "+progress+"%"); author.setTextSize(12); author.setTextColor(Color.rgb(95,99,104)); author.setSingleLine(true); author.setPadding(dp(2),dp(3),dp(2),0); cell.addView(author); loadBookVisual(file,cover,title,author); return cell;
+
+    private View createGridCard(File file,int cellWidth) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(7), dp(7), dp(7), dp(9));
+        card.setBackground(roundRect(Color.WHITE, dp(18), dp(1), Color.rgb(232, 234, 240)));
+        card.setElevation(dp(1));
+        card.setClickable(true);
+        card.setOnClickListener(v -> openBook(file));
+        card.setOnLongClickListener(v -> { confirmDelete(file); return true; });
+        card.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
+                v.animate().scaleX(0.985f).scaleY(0.985f).setDuration(70L).start();
+            else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP || e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL)
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120L).start();
+            return false;
+        });
+
+        int innerWidth = Math.max(dp(96), cellWidth - dp(26));
+        int coverHeight = Math.round(innerWidth * 1.47f);
+        ImageView cover = new ImageView(this);
+        cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        String initial = stripExtension(file.getName());
+        cover.setImageBitmap(placeholderBitmap(initial, Math.max(220, innerWidth), Math.max(320, coverHeight)));
+        cover.setBackground(roundRect(Color.rgb(235, 237, 242), dp(13), 0, 0));
+        cover.setClipToOutline(true);
+        card.addView(cover, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, coverHeight));
+
+        TextView title = new TextView(this);
+        title.setText(initial);
+        title.setTextSize(14.5f);
+        title.setTextColor(Color.rgb(29, 31, 37));
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setMaxLines(2);
+        title.setLineSpacing(0f, 1.05f);
+        title.setPadding(dp(2), dp(9), dp(2), 0);
+        card.addView(title);
+
+        int progress = prefs.getInt("percent_" + file.getName(), 0);
+        TextView meta = new TextView(this);
+        meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "%");
+        meta.setTextSize(10.5f);
+        meta.setTextColor(Color.rgb(103, 108, 120));
+        meta.setSingleLine(true);
+        meta.setPadding(dp(2), dp(5), dp(2), dp(6));
+        card.addView(meta);
+
+        LinearLayout track = new LinearLayout(this);
+        track.setGravity(Gravity.START);
+        track.setBackground(roundRect(Color.rgb(236, 238, 243), dp(2), 0, 0));
+        View fill = new View(this);
+        fill.setBackground(roundRect(Color.rgb(82, 82, 214), dp(2), 0, 0));
+        int trackWidth = Math.max(1, innerWidth - dp(2));
+        track.addView(fill, new LinearLayout.LayoutParams(Math.max(0, Math.round(trackWidth * progress / 100f)), dp(3)));
+        card.addView(track, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
+
+        loadBookVisual(file, cover, title, meta);
+        return card;
     }
 
-    private View createListCard(File file){
-        LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.HORIZONTAL); card.setGravity(Gravity.CENTER_VERTICAL); card.setPadding(dp(4),dp(8),dp(4),dp(8)); card.setOnClickListener(v->openBook(file)); card.setOnLongClickListener(v->{confirmDelete(file);return true;});
-        ImageView cover=new ImageView(this); cover.setScaleType(ImageView.ScaleType.CENTER_CROP); String initial=stripExtension(file.getName()); cover.setImageBitmap(placeholderBitmap(initial,180,260)); cover.setBackground(roundRect(Color.rgb(232,234,237),dp(7),0,0)); cover.setClipToOutline(true); cover.setElevation(dp(1)); card.addView(cover,new LinearLayout.LayoutParams(dp(72),dp(104)));
-        LinearLayout text=new LinearLayout(this); text.setOrientation(LinearLayout.VERTICAL); text.setPadding(dp(16),dp(5),dp(8),dp(5)); TextView title=new TextView(this); title.setText(initial); title.setTextSize(17); title.setTextColor(Color.rgb(32,33,36)); title.setTypeface(Typeface.DEFAULT,Typeface.BOLD); title.setMaxLines(2); text.addView(title);
-        TextView author=new TextView(this); int progress=prefs.getInt("percent_"+file.getName(),0); author.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB")+" · "+progress+"% read"); author.setTextSize(13); author.setTextColor(Color.rgb(95,99,104)); author.setPadding(0,dp(7),0,0); text.addView(author);
-        TextView cont=new TextView(this); cont.setText(progress>0?"Continue reading":"Start reading"); cont.setTextSize(13); cont.setTextColor(Color.rgb(26,115,232)); cont.setPadding(0,dp(9),0,0); text.addView(cont); card.addView(text,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1)); loadBookVisual(file,cover,title,author);
-        LinearLayout wrap=new LinearLayout(this); wrap.setOrientation(LinearLayout.VERTICAL); wrap.addView(card,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT)); View divider=new View(this); divider.setBackgroundColor(Color.rgb(238,238,238)); LinearLayout.LayoutParams dlp=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(1)); dlp.leftMargin=dp(92); wrap.addView(divider,dlp); return wrap;
+
+    private View createListCard(File file) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(10), dp(10), dp(12), dp(10));
+        card.setBackground(roundRect(Color.WHITE, dp(18), dp(1), Color.rgb(232, 234, 240)));
+        card.setElevation(dp(1));
+        card.setOnClickListener(v -> openBook(file));
+        card.setOnLongClickListener(v -> { confirmDelete(file); return true; });
+
+        ImageView cover = new ImageView(this);
+        cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        String initial = stripExtension(file.getName());
+        cover.setImageBitmap(placeholderBitmap(initial, 210, 300));
+        cover.setBackground(roundRect(Color.rgb(235, 237, 242), dp(12), 0, 0));
+        cover.setClipToOutline(true);
+        card.addView(cover, new LinearLayout.LayoutParams(dp(76), dp(110)));
+
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.setPadding(dp(14), dp(2), dp(4), dp(2));
+        TextView title = new TextView(this);
+        title.setText(initial);
+        title.setTextSize(16);
+        title.setTextColor(Color.rgb(29, 31, 37));
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setMaxLines(2);
+        text.addView(title);
+
+        int progress = prefs.getInt("percent_" + file.getName(), 0);
+        TextView meta = new TextView(this);
+        meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "% read");
+        meta.setTextSize(12);
+        meta.setTextColor(Color.rgb(103, 108, 120));
+        meta.setPadding(0, dp(7), 0, 0);
+        text.addView(meta);
+
+        TextView action = new TextView(this);
+        action.setText(progress > 0 ? "Continue reading  ›" : "Start reading  ›");
+        action.setTextSize(12.5f);
+        action.setTextColor(Color.rgb(82, 82, 214));
+        action.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        action.setPadding(0, dp(10), 0, 0);
+        text.addView(action);
+        card.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        loadBookVisual(file, cover, title, meta);
+        return card;
+    }
+
+
+
+    private void configureLibraryLayout() {
+        if (libraryRecycler == null) return;
+        int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels /
+                Math.max(1f, getResources().getDisplayMetrics().density));
+        if (!gridMode) libraryColumns = 1;
+        else if (widthDp >= 900) libraryColumns = 5;
+        else if (widthDp >= 680) libraryColumns = 4;
+        else if (widthDp >= 430) libraryColumns = 3;
+        else libraryColumns = 2;
+
+        GridLayoutManager layout = new GridLayoutManager(this, libraryColumns);
+        layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override public int getSpanSize(int position) {
+                if (position <= 1) return libraryColumns;
+                if (visibleBooks.isEmpty() && position == 2) return libraryColumns;
+                return 1;
+            }
+        });
+        libraryRecycler.setLayoutManager(layout);
+    }
+
+    private int libraryCardWidth() {
+        int screen = getResources().getDisplayMetrics().widthPixels;
+        int gap = dp(12);
+        int side = dp(14);
+        int columns = Math.max(1, libraryColumns);
+        return Math.max(dp(118), (screen - side * 2 - gap * (columns - 1)) / columns);
+    }
+
+    private View buildLibraryHeader() {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(14), dp(12), dp(14), dp(2));
+
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(16), dp(14), dp(12), dp(14));
+        hero.setBackground(gradientRoundRect(new int[]{Color.rgb(239, 243, 255), Color.rgb(255, 247, 242)}, dp(24)));
+
+        LinearLayout brandRow = new LinearLayout(this);
+        brandRow.setOrientation(LinearLayout.HORIZONTAL);
+        brandRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout brandCopy = new LinearLayout(this);
+        brandCopy.setOrientation(LinearLayout.VERTICAL);
+        TextView brand = new TextView(this);
+        brand.setText("WoW Reader");
+        brand.setTextSize(27);
+        brand.setTextColor(Color.rgb(27, 29, 35));
+        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        TextView sub = new TextView(this);
+        sub.setText("Your books, beautifully organized");
+        sub.setTextSize(11.5f);
+        sub.setTextColor(Color.rgb(100, 104, 116));
+        sub.setPadding(0, dp(2), 0, 0);
+        brandCopy.addView(brand);
+        brandCopy.addView(sub);
+        brandRow.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView backup = iconButton("⇅");
+        backup.setTextSize(18);
+        backup.setContentDescription("Backup and restore");
+        backup.setOnClickListener(v -> showCloudMenu());
+        brandRow.addView(backup, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        viewModeButton = iconButton(gridMode ? "☷" : "▦");
+        viewModeButton.setTextSize(17);
+        viewModeButton.setContentDescription("Change library view");
+        viewModeButton.setOnClickListener(v -> {
+            gridMode = !gridMode;
+            prefs.edit().putBoolean("library_grid", gridMode).apply();
+            viewModeButton.setText(gridMode ? "☷" : "▦");
+            configureLibraryLayout();
+            if (libraryAdapter != null) libraryAdapter.notifyDataSetChanged();
+        });
+        LinearLayout.LayoutParams viewLp = new LinearLayout.LayoutParams(dp(44), dp(44));
+        viewLp.leftMargin = dp(8);
+        brandRow.addView(viewModeButton, viewLp);
+        hero.addView(brandRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+
+        searchInput = new EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setHint("Search title or book");
+        searchInput.setTextSize(14.5f);
+        searchInput.setTextColor(Color.rgb(31, 34, 40));
+        searchInput.setHintTextColor(Color.rgb(118, 123, 136));
+        searchInput.setPadding(dp(16), 0, dp(16), 0);
+        searchInput.setBackground(roundRect(Color.argb(218, 255, 255, 255), dp(23), dp(1), Color.argb(70, 180, 185, 198)));
+        if (!searchQuery.isEmpty()) {
+            searchInput.setText(searchQuery);
+            searchInput.setSelection(searchInput.length());
+        }
+        searchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                searchQuery = s.toString().trim().toLowerCase(Locale.ROOT);
+                refreshLibrary();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+        searchLp.topMargin = dp(8);
+        hero.addView(searchInput, searchLp);
+        outer.addView(hero, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        addDiscoverySection(outer);
+        return outer;
+    }
+
+    private View buildLibrarySectionHeader() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(20), dp(8), dp(20), dp(8));
+        TextView label = new TextView(this);
+        label.setText("Library");
+        label.setTextSize(18);
+        label.setTextColor(Color.rgb(31, 34, 40));
+        label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        row.addView(label, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        countView = new TextView(this);
+        countView.setTextSize(12);
+        countView.setTextColor(Color.rgb(106, 111, 124));
+        countView.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        row.addView(countView, new LinearLayout.LayoutParams(dp(100), dp(42)));
+        return row;
+    }
+
+    private View buildEmptyState() {
+        TextView empty = new TextView(this);
+        empty.setTextSize(15);
+        empty.setTextColor(Color.rgb(104, 109, 121));
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(dp(30), dp(72), dp(30), dp(96));
+        return empty;
+    }
+
+    private GradientDrawable gradientRoundRect(int[] colors, int radius) {
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR, colors);
+        d.setCornerRadius(radius);
+        return d;
+    }
+
+    private final class LibraryAdapter extends RecyclerView.Adapter<LibraryHolder> {
+        private static final int HEADER = 0;
+        private static final int SECTION = 1;
+        private static final int BOOK = 2;
+        private static final int EMPTY = 3;
+        private final List<File> items = new ArrayList<>();
+
+        void submit(List<File> next) {
+            items.clear();
+            if (next != null) items.addAll(next);
+            notifyDataSetChanged();
+        }
+
+        @Override public int getItemCount() {
+            return 2 + (items.isEmpty() ? 1 : items.size());
+        }
+
+        @Override public int getItemViewType(int position) {
+            if (position == 0) return HEADER;
+            if (position == 1) return SECTION;
+            if (items.isEmpty()) return EMPTY;
+            return BOOK;
+        }
+
+        @Override public LibraryHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            if (viewType == HEADER) return new LibraryHolder(buildLibraryHeader());
+            if (viewType == SECTION) return new LibraryHolder(buildLibrarySectionHeader());
+            if (viewType == EMPTY) return new LibraryHolder(buildEmptyState());
+            FrameLayout shell = new FrameLayout(MainActivity.this);
+            shell.setPadding(dp(7), 0, dp(7), dp(14));
+            return new LibraryHolder(shell);
+        }
+
+        @Override public void onBindViewHolder(LibraryHolder holder, int position) {
+            int type = getItemViewType(position);
+            if (type == SECTION) {
+                if (countView != null) countView.setText(items.size() + (items.size() == 1 ? " book" : " books"));
+                return;
+            }
+            if (type == EMPTY) {
+                ((TextView) holder.itemView).setText(searchQuery.isEmpty()
+                        ? "Your library is ready.\nTap ＋ to add an EPUB or PDF."
+                        : "No books match your search.");
+                return;
+            }
+            if (type != BOOK) return;
+            int index = position - 2;
+            if (index < 0 || index >= items.size()) return;
+            File file = items.get(index);
+            FrameLayout shell = (FrameLayout) holder.itemView;
+            shell.removeAllViews();
+            View card = gridMode ? createGridCard(file, libraryCardWidth()) : createListCard(file);
+            shell.addView(card, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    private static final class LibraryHolder extends RecyclerView.ViewHolder {
+        LibraryHolder(View itemView) { super(itemView); }
     }
 
     private void loadBookVisual(File file,ImageView cover,TextView titleView,TextView metaView){
@@ -229,7 +590,7 @@ public class MainActivity extends Activity {
 
     private String queryDisplayName(Uri uri){ if("file".equalsIgnoreCase(uri.getScheme()))return new File(uri.getPath()).getName(); Cursor c=null; try{c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null);if(c!=null&&c.moveToFirst())return c.getString(0);}catch(Exception ignored){}finally{if(c!=null)c.close();}return null; }
     private File uniqueFile(String originalName){ String safe=originalName.replaceAll("[\\\\/:*?\"<>|]","_"); File f=new File(libraryDir,safe);if(!f.exists())return f;int dot=safe.lastIndexOf('.');String base=dot>0?safe.substring(0,dot):safe,ext=dot>0?safe.substring(dot):"";return new File(libraryDir,base+"_"+System.currentTimeMillis()+ext); }
-    private void openBook(File file){Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);}
+    private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);}
     private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from library?").setMessage(stripExtension(file.getName())).setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).apply();refreshLibrary();}}).show();}
 
     private void showCloudMenu(){new AlertDialog.Builder(this).setTitle("Backup & restore").setItems(new String[]{"Backup library","Restore books"},(dialog,which)->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);startActivityForResult(i,which==0?REQ_BACKUP:REQ_RESTORE);}).show();}

@@ -103,6 +103,7 @@ public class BookReaderActivity extends Activity {
     private int paperGestureDirection;
     private int paperOriginalPageZero;
     private int paperTargetPageZero;
+    private boolean paperGestureChapterBoundary;
     private final List<File> spine = new ArrayList<>();
     private final List<String> chapterTitles = new ArrayList<>();
     private final List<Integer> tocSpineIndices = new ArrayList<>();
@@ -266,7 +267,10 @@ public class BookReaderActivity extends Activity {
         topBar.addView(appearanceButton, new LinearLayout.LayoutParams(dp(48), dp(50)));
 
         FrameLayout.LayoutParams topLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(60), Gravity.TOP);
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58), Gravity.TOP);
+        topLp.leftMargin = dp(10);
+        topLp.rightMargin = dp(10);
+        topLp.topMargin = dp(8);
         root.addView(topBar, topLp);
 
         bottomBar = new LinearLayout(this);
@@ -297,7 +301,10 @@ public class BookReaderActivity extends Activity {
         bottomBar.addView(next, new LinearLayout.LayoutParams(dp(56), dp(50)));
 
         FrameLayout.LayoutParams bottomLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(58), Gravity.BOTTOM);
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54), Gravity.BOTTOM);
+        bottomLp.leftMargin = dp(34);
+        bottomLp.rightMargin = dp(34);
+        bottomLp.bottomMargin = dp(12);
         root.addView(bottomBar, bottomLp);
 
         selectionBar = new LinearLayout(this);
@@ -753,10 +760,20 @@ public class BookReaderActivity extends Activity {
     }
 
     private void onWebSelection(String text, int start, int end) {
+        if (paperGestureActive || suppressingSelectionForPaperGesture()) {
+            currentSelection = null;
+            hideSelectionBar();
+            clearWebSelection();
+            return;
+        }
         if (text == null || text.trim().isEmpty() || end <= start) {
             currentSelection = null;
             hideSelectionBar();
             return;
+        }
+        if (paperGestureCandidate) {
+            paperGestureCandidate = false;
+            recyclePageVelocityTracker();
         }
         SelectionData data = new SelectionData();
         data.text = text.trim();
@@ -765,6 +782,7 @@ public class BookReaderActivity extends Activity {
         currentSelection = data;
         showSelectionBar();
     }
+
 
     private void showSelectionBar() {
         if (selectionBar == null || isPdf) return;
@@ -1314,12 +1332,17 @@ public class BookReaderActivity extends Activity {
     private void completePageReady() {
         emptyChapterSkipCount = 0;
         jumpToPendingTocFragment(() -> {
+            if (paperGestureChapterBoundary && paperGestureReleased && paperGestureCommit) {
+                finishInteractiveChapterBoundary();
+                return;
+            }
             if (finishPendingChapterCurl()) return;
             pageTurnLocked = false;
             chapterLoading = false;
             finishChapterFade();
         });
     }
+
 
     private void skipEmptyEpubSpine() {
         if (spine.isEmpty()) return;
@@ -1362,7 +1385,6 @@ public class BookReaderActivity extends Activity {
         if (action == MotionEvent.ACTION_DOWN) {
             resetPaperGestureState();
             if (chapterLoading || pageTurnLocked || (pageCurlView != null && pageCurlView.isBusy())) return false;
-
             paperGestureCandidate = true;
             paperDownX = event.getX();
             paperDownY = event.getY();
@@ -1381,35 +1403,38 @@ public class BookReaderActivity extends Activity {
             float dy = event.getY() - paperDownY;
 
             if (!paperGestureActive) {
-                if (Math.abs(dx) < pageTouchSlop) return false;
-                if (Math.abs(dx) < Math.abs(dy) * 1.15f) {
+                int earlySlop = Math.max(dp(4), Math.max(1, pageTouchSlop / 2));
+                if (Math.abs(dx) < earlySlop) return false;
+                if (Math.abs(dx) < Math.abs(dy) * 1.22f) {
                     resetPaperGestureState();
                     return false;
                 }
 
                 int direction = dx < 0f ? 1 : -1;
                 int targetPage = currentPageInChapter + direction;
-                if (targetPage < 1 || targetPage > pageCountInChapter) {
-                    // Let the existing fling/chapter path handle chapter boundaries.
-                    resetPaperGestureState();
-                    return false;
-                }
+                cancelNativeSelectionForPaperGesture(event);
 
-                if (!beginInteractivePaperTurn(direction, targetPage - 1)) {
+                if (targetPage < 1 || targetPage > pageCountInChapter) {
+                    int targetSpine = currentSpine + direction;
+                    if (targetSpine < 0 || targetSpine >= spine.size() ||
+                            !beginInteractiveChapterBoundary(direction)) {
+                        resetPaperGestureState();
+                        return true;
+                    }
+                    paperGestureChapterBoundary = true;
+                } else if (!beginInteractivePaperTurn(direction, targetPage - 1)) {
                     resetPaperGestureState();
-                    return false;
+                    return true;
                 }
                 paperGestureActive = true;
             }
 
             float width = Math.max(1f, webView.getWidth());
-            paperProgress = Math.max(0f, Math.min(1f, Math.abs(dx) / (width * 0.94f)));
+            paperProgress = Math.max(0f, Math.min(1f, Math.abs(dx) / (width * 0.965f)));
             paperTouchY = webView.getHeight() <= 0 ? 0.5f :
-                    Math.max(0.08f, Math.min(0.92f, event.getY() / (float) webView.getHeight()));
-
-            if (paperGestureReady && pageCurlView != null) {
+                    Math.max(0.07f, Math.min(0.93f, event.getY() / (float) webView.getHeight()));
+            if (paperGestureReady && pageCurlView != null)
                 pageCurlView.updateInteractive(paperProgress, paperTouchY);
-            }
             return true;
         }
 
@@ -1425,21 +1450,133 @@ public class BookReaderActivity extends Activity {
                 velocityX = pageVelocityTracker.getXVelocity();
             }
             paperReleaseVelocityX = velocityX;
-
             float width = Math.max(1f, webView.getWidth());
             float towardTurn = (-paperGestureDirection * velocityX) / width;
-            float projected = paperProgress + towardTurn * 0.115f;
-            boolean commit = action != MotionEvent.ACTION_CANCEL && projected >= 0.42f;
+            float projected = paperProgress + towardTurn * 0.13f;
+            boolean commit = action != MotionEvent.ACTION_CANCEL &&
+                    (projected >= 0.37f || towardTurn > 0.52f);
 
             paperGestureCommit = commit;
             paperGestureReleased = true;
             recyclePageVelocityTracker();
 
-            if (paperGestureReady) settlePaperGesture();
+            if (paperGestureChapterBoundary) {
+                if (commit) commitInteractiveChapterBoundary();
+                else cancelInteractiveChapterBoundary();
+            } else if (paperGestureReady) {
+                settlePaperGesture();
+            }
             return true;
         }
-
         return paperGestureActive;
+    }
+
+
+
+    private boolean suppressingSelectionForPaperGesture() {
+        return paperGestureActive || (paperGestureCandidate && pageTurnLocked && paperGestureDirection != 0);
+    }
+
+    private void cancelNativeSelectionForPaperGesture(MotionEvent source) {
+        if (webView == null) return;
+        currentSelection = null;
+        hideSelectionBar();
+        webView.cancelLongPress();
+        webView.setLongClickable(false);
+        clearWebSelection();
+        try {
+            MotionEvent cancel = MotionEvent.obtain(source);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            webView.onTouchEvent(cancel);
+            cancel.recycle();
+        } catch (Exception ignored) {}
+    }
+
+    private boolean beginInteractiveChapterBoundary(int direction) {
+        if (pageCurlView == null || webView == null) return false;
+        Bitmap current = captureWebViewBitmap();
+        if (current == null) return false;
+        Bitmap under;
+        try {
+            under = Bitmap.createBitmap(current.getWidth(), current.getHeight(), Bitmap.Config.ARGB_8888);
+            under.eraseColor(readerTheme == 2 ? Color.rgb(18, 18, 18) :
+                    (readerTheme == 1 ? Color.rgb(244, 236, 216) : Color.WHITE));
+        } catch (Throwable e) {
+            current.recycle();
+            return false;
+        }
+        paperGestureDirection = direction < 0 ? -1 : 1;
+        paperOriginalPageZero = Math.max(0, currentPageInChapter - 1);
+        paperGestureReady = true;
+        paperGestureReleased = false;
+        paperGestureCommit = false;
+        pageTurnLocked = true;
+        lastPageTurnMs = System.currentTimeMillis();
+        pageCurlView.hold(current);
+        pageCurlView.beginInteractive(under, paperGestureDirection, paperProgress, paperTouchY);
+        return true;
+    }
+
+    private void cancelInteractiveChapterBoundary() {
+        if (pageCurlView == null) {
+            pageTurnLocked = false;
+            resetPaperGestureState();
+            return;
+        }
+        pageCurlView.settleInteractive(false, paperReleaseVelocityX, () -> {
+            pageCurlView.release();
+            pageTurnLocked = false;
+            resetPaperGestureState();
+        });
+    }
+
+    private void commitInteractiveChapterBoundary() {
+        int target = currentSpine + (paperGestureDirection < 0 ? -1 : 1);
+        if (target < 0 || target >= spine.size()) {
+            cancelInteractiveChapterBoundary();
+            return;
+        }
+        pendingChapterCurlDirection = paperGestureDirection;
+        chapterLoading = true;
+        pageTurnLocked = true;
+        currentSpine = target;
+        currentProgressPermille = paperGestureDirection < 0 ? 1000 : 0;
+        saveEpubStateOnly();
+        loadCurrentEpubChapter();
+    }
+
+    private void finishInteractiveChapterBoundary() {
+        if (pageCurlView == null) {
+            pendingChapterCurlDirection = 0;
+            chapterLoading = false;
+            pageTurnLocked = false;
+            resetPaperGestureState();
+            return;
+        }
+        Bitmap target = captureWebViewBitmap();
+        if (target == null) {
+            pageCurlView.release();
+            pendingChapterCurlDirection = 0;
+            chapterLoading = false;
+            pageTurnLocked = false;
+            resetPaperGestureState();
+            return;
+        }
+        pendingChapterCurlDirection = 0;
+        pageCurlView.replaceTarget(target);
+        pageCurlView.settleInteractive(true, paperReleaseVelocityX, () -> {
+            chapterLoading = false;
+            finishNativePageCurl();
+        });
+    }
+
+    private void tintChromeChildren(ViewGroup group, int color) {
+        if (group == null) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView) ((TextView) child).setTextColor(color);
+            else if (child instanceof ViewGroup) tintChromeChildren((ViewGroup) child, color);
+        }
     }
 
     private boolean beginInteractivePaperTurn(int direction, int targetZeroBased) {
@@ -1548,27 +1685,35 @@ public class BookReaderActivity extends Activity {
         paperGestureReady = false;
         paperGestureReleased = false;
         paperGestureCommit = false;
+        paperGestureChapterBoundary = false;
         paperGestureDirection = 0;
         paperProgress = 0f;
         paperReleaseVelocityX = 0f;
         paperTouchY = 0.5f;
+        if (webView != null) webView.setLongClickable(true);
     }
+
 
     private void turnPage(int delta) {
         if (webView == null || chapterLoading || !"page".equals(readingMode) || delta == 0) return;
         long now = System.currentTimeMillis();
-        if (pageTurnLocked || now - lastPageTurnMs < 300L) return;
+        if (pageTurnLocked || now - lastPageTurnMs < 220L) return;
 
         lastPageTurnMs = now;
-        int targetPage = currentPageInChapter + (delta < 0 ? -1 : 1);
+        int direction = delta < 0 ? -1 : 1;
+        int targetPage = currentPageInChapter + direction;
         boolean insideChapter = targetPage >= 1 && targetPage <= pageCountInChapter;
 
-        if ("paper".equals(pageAnimation) && insideChapter && pageCurlView != null) {
-            startNativePageCurl(delta < 0 ? -1 : 1, targetPage - 1);
-        } else {
-            performJsPageTurn(delta < 0 ? -1 : 1);
+        if (!insideChapter) {
+            navigateChapter(direction, direction < 0);
+            return;
         }
+        if ("paper".equals(pageAnimation) && pageCurlView != null)
+            startNativePageCurl(direction, targetPage - 1);
+        else
+            performJsPageTurn(direction);
     }
+
 
     private void startNativePageCurl(int direction, int targetZeroBased) {
         Bitmap current = captureWebViewBitmap();
@@ -2138,7 +2283,7 @@ public class BookReaderActivity extends Activity {
     private String pageAnimationDisplayName() {
         if ("slide".equals(pageAnimation)) return "Slide";
         if ("none".equals(pageAnimation)) return "None";
-        return "Natural paper";
+        return "3D page curl";
     }
 
     private String alignmentDisplayName() {
@@ -2311,16 +2456,38 @@ public class BookReaderActivity extends Activity {
 
     private void hideControls() {
         controlsVisible = false;
-        if (topBar != null) topBar.setVisibility(View.GONE);
-        if (bottomBar != null) bottomBar.setVisibility(View.GONE);
+        if (topBar != null && topBar.getVisibility() == View.VISIBLE) {
+            topBar.animate().cancel();
+            topBar.animate().alpha(0f).translationY(-dp(14)).setDuration(145L)
+                    .withEndAction(() -> { topBar.setVisibility(View.GONE); topBar.setAlpha(1f); topBar.setTranslationY(0f); }).start();
+        }
+        if (bottomBar != null && bottomBar.getVisibility() == View.VISIBLE) {
+            bottomBar.animate().cancel();
+            bottomBar.animate().alpha(0f).translationY(dp(14)).setDuration(145L)
+                    .withEndAction(() -> { bottomBar.setVisibility(View.GONE); bottomBar.setAlpha(1f); bottomBar.setTranslationY(0f); }).start();
+        }
     }
+
 
     private void showControls() {
         controlsVisible = true;
-        if (topBar != null) topBar.setVisibility(View.VISIBLE);
-        if (bottomBar != null) bottomBar.setVisibility(View.VISIBLE);
+        if (topBar != null) {
+            topBar.animate().cancel();
+            topBar.setVisibility(View.VISIBLE);
+            topBar.setAlpha(0f);
+            topBar.setTranslationY(-dp(10));
+            topBar.animate().alpha(1f).translationY(0f).setDuration(175L).start();
+        }
+        if (bottomBar != null) {
+            bottomBar.animate().cancel();
+            bottomBar.setVisibility(View.VISIBLE);
+            bottomBar.setAlpha(0f);
+            bottomBar.setTranslationY(dp(10));
+            bottomBar.animate().alpha(1f).translationY(0f).setDuration(175L).start();
+        }
         enterImmersive();
     }
+
 
     private void toggleControls() {
         if (controlsVisible) hideControls();
@@ -2343,36 +2510,41 @@ public class BookReaderActivity extends Activity {
         int fg;
         int glass;
         int stroke;
-
         if (isPdf) {
             solid = Color.WHITE;
             fg = Color.rgb(32, 33, 36);
-            glass = Color.argb(232, 255, 255, 255);
-            stroke = Color.argb(78, 255, 255, 255);
+            glass = Color.argb(238, 255, 255, 255);
+            stroke = Color.argb(82, 210, 214, 220);
         } else if (readerTheme == 2) {
             solid = Color.rgb(18, 18, 18);
-            fg = Color.rgb(232, 234, 237);
-            glass = Color.argb(224, 24, 25, 28);
-            stroke = Color.argb(48, 255, 255, 255);
+            fg = Color.rgb(240, 242, 246);
+            glass = Color.argb(232, 28, 29, 33);
+            stroke = Color.argb(56, 255, 255, 255);
         } else if (readerTheme == 1) {
             solid = Color.rgb(244, 236, 216);
             fg = Color.rgb(32, 33, 36);
-            glass = Color.argb(230, 248, 241, 222);
-            stroke = Color.argb(82, 255, 255, 255);
+            glass = Color.argb(238, 250, 244, 228);
+            stroke = Color.argb(92, 168, 153, 126);
         } else {
             solid = Color.WHITE;
             fg = Color.rgb(32, 33, 36);
-            glass = Color.argb(228, 255, 255, 255);
-            stroke = Color.argb(88, 255, 255, 255);
+            glass = Color.argb(238, 255, 255, 255);
+            stroke = Color.argb(74, 175, 181, 193);
         }
-
-        if (topBar != null) topBar.setBackground(glassPanel(glass, 0, stroke));
-        if (bottomBar != null) bottomBar.setBackground(glassPanel(glass, 0, stroke));
+        if (topBar != null) {
+            topBar.setBackground(glassPanel(glass, dp(19), stroke));
+            tintChromeChildren(topBar, fg);
+        }
+        if (bottomBar != null) {
+            bottomBar.setBackground(glassPanel(glass, dp(19), stroke));
+            tintChromeChildren(bottomBar, fg);
+        }
         if (titleView != null) titleView.setTextColor(fg);
         if (positionView != null) positionView.setTextColor(fg);
         if (root != null) root.setBackgroundColor(solid);
         if (webView != null) webView.setBackgroundColor(solid);
     }
+
 
     private void openPdf() {
         try {

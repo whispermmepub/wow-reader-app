@@ -78,7 +78,7 @@ final class PageCurlView extends View {
         toBitmap = target;
         this.direction = direction < 0 ? -1 : 1;
         this.progress = clamp(startProgress, 0f, 1f);
-        this.touchY = clamp(touchY, 0.08f, 0.92f);
+        this.touchY = clamp(touchY, 0.07f, 0.93f);
         setVisibility(VISIBLE);
         bringToFront();
         invalidate();
@@ -87,8 +87,15 @@ final class PageCurlView extends View {
     void updateInteractive(float progress, float touchY) {
         if (fromBitmap == null || toBitmap == null || animator != null) return;
         this.progress = clamp(progress, 0f, 1f);
-        this.touchY = clamp(touchY, 0.08f, 0.92f);
-        invalidate();
+        this.touchY = clamp(touchY, 0.07f, 0.93f);
+        postInvalidateOnAnimation();
+    }
+
+    void replaceTarget(Bitmap target) {
+        if (target == null) return;
+        if (toBitmap != null && toBitmap != fromBitmap && !toBitmap.isRecycled()) toBitmap.recycle();
+        toBitmap = target;
+        postInvalidateOnAnimation();
     }
 
     void settleInteractive(boolean completeTurn, float velocityX, Runnable completion) {
@@ -127,7 +134,7 @@ final class PageCurlView extends View {
                 : new PathInterpolator(0.28f, 0.00f, 0.40f, 1.00f));
         animator.addUpdateListener(a -> {
             progress = (float) a.getAnimatedValue();
-            invalidate();
+            postInvalidateOnAnimation();
         });
         animator.addListener(new AnimatorListenerAdapter() {
             private boolean cancelled;
