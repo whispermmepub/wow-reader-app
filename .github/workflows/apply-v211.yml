@@ -1,0 +1,50 @@
+name: Apply WoW Reader v2.11
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v211.py'
+      - '.github/workflows/apply-v211.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply v2.11 changes
+        run: python3 tools/apply_v211.py
+      - name: Validate migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'versionCode 23' app/build.gradle
+          grep -q "versionName '2.11.0'" app/build.gradle
+          grep -q 'Display options' "$READER"
+          grep -q 'reader_night_light' "$READER"
+          grep -q 'Reading progress' "$READER"
+          grep -q 'seekToOverallProgress' "$READER"
+          grep -q 'scheduleChromeAutoHide' "$READER"
+          grep -q 'Night Light' "$READER"
+          grep -q 'More reader settings' "$READER"
+          grep -q 'setItemViewCacheSize(20)' "$MAIN"
+          git diff --check
+      - name: Commit v2.11 app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/build.gradle app/src/main/java/com/whisper/wowreader/BookReaderActivity.java app/src/main/java/com/whisper/wowreader/MainActivity.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'WoW Reader v2.11 Play Books inspired UX polish'
+          git push origin HEAD:main
