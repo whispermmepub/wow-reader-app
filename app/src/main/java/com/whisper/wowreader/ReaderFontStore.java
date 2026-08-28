@@ -11,7 +11,6 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -47,7 +46,7 @@ final class ReaderFontStore {
                 out.add(new FontEntry("custom:" + f.getName(), labelFromStoredName(f.getName()), f));
             }
         }
-        Collections.sort(out, Comparator.comparing(a -> a.label.toLowerCase(Locale.ROOT)));
+        Collections.sort(out, (a, b) -> a.label.compareToIgnoreCase(b.label));
         return out;
     }
 
