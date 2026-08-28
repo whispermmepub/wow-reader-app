@@ -1,9 +1,19 @@
 from pathlib import Path
 p = Path('app/src/main/java/com/whisper/wowreader/MainActivity.java')
 s = p.read_text(encoding='utf-8')
-old = '            counts.put(author, counts.getOrDefault(author, 0) + 1);\n'
-new = '            Integer oldCount = counts.get(author);\n            counts.put(author, (oldCount == null ? 0 : oldCount) + 1);\n'
+old = '''        authors.sort((a, b) -> {
+            int ga = titleScriptGroup(a), gb = titleScriptGroup(b);
+            if (ga != gb) return Integer.compare(ga, gb);
+            return ga == 0 ? myanmarCollator.compare(a, b) : englishCollator.compare(a, b);
+        });
+'''
+new = '''        java.util.Collections.sort(authors, (a, b) -> {
+            int ga = titleScriptGroup(a), gb = titleScriptGroup(b);
+            if (ga != gb) return Integer.compare(ga, gb);
+            return ga == 0 ? myanmarCollator.compare(a, b) : englishCollator.compare(a, b);
+        });
+'''
 if old not in s:
-    raise SystemExit('author count anchor missing')
+    raise SystemExit('author sort anchor missing')
 p.write_text(s.replace(old, new, 1), encoding='utf-8')
-print('Patched author counts for API 23')
+print('Patched author sort for API 23')
