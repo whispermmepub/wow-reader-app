@@ -380,7 +380,8 @@ final class GoogleDriveSync {
     }
 
     private static void updateBackup(String token, String id, File archive) throws Exception {
-        HttpURLConnection c = open("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media&fields=id", "PATCH", token);
+        HttpURLConnection c = open("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media&fields=id", "POST", token);
+        c.setRequestProperty("X-HTTP-Method-Override", "PATCH");
         c.setRequestProperty("Content-Type", "application/zip");
         c.setDoOutput(true);
         try (OutputStream out = new BufferedOutputStream(c.getOutputStream())) {

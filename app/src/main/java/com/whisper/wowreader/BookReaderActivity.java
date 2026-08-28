@@ -3165,6 +3165,7 @@ public class BookReaderActivity extends Activity {
             prefs.edit()
                     .putInt("pdf_page_" + bookFile.getName(), currentPdfPage)
                     .putInt("percent_" + bookFile.getName(), percent)
+                    .putLong("sync_updated_ms", System.currentTimeMillis())
                     .apply();
 
             updateBookmarkIcon();
