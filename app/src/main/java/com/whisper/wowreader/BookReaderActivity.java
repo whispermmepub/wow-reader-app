@@ -27,7 +27,9 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -86,6 +88,21 @@ public class BookReaderActivity extends Activity {
     private int pendingChapterCurlDirection = 0;
     private boolean pendingChapterFade = false;
     private GestureDetector readerTapDetector;
+    private VelocityTracker pageVelocityTracker;
+    private int pageTouchSlop = 12;
+    private float paperDownX;
+    private float paperDownY;
+    private float paperProgress;
+    private float paperTouchY = 0.5f;
+    private float paperReleaseVelocityX;
+    private boolean paperGestureCandidate;
+    private boolean paperGestureActive;
+    private boolean paperGestureReady;
+    private boolean paperGestureReleased;
+    private boolean paperGestureCommit;
+    private int paperGestureDirection;
+    private int paperOriginalPageZero;
+    private int paperTargetPageZero;
     private final List<File> spine = new ArrayList<>();
     private final List<String> chapterTitles = new ArrayList<>();
     private final List<Integer> tocSpineIndices = new ArrayList<>();
@@ -348,6 +365,8 @@ public class BookReaderActivity extends Activity {
         webView.setVerticalScrollBarEnabled(false);
         webView.addJavascriptInterface(new ReaderBridge(), "WoW");
 
+        pageTouchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
+
         readerTapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent e) { return true; }
 
@@ -371,8 +390,9 @@ public class BookReaderActivity extends Activity {
         });
 
         webView.setOnTouchListener((v, event) -> {
-            readerTapDetector.onTouchEvent(event);
-            return false;
+            boolean paperHandled = handlePaperGesture(event);
+            if (!paperHandled) readerTapDetector.onTouchEvent(event);
+            return paperHandled;
         });
 
         webView.setWebViewClient(new WebViewClient() {
@@ -1333,6 +1353,207 @@ public class BookReaderActivity extends Activity {
         loadCurrentEpubChapter();
     }
 
+
+    private boolean handlePaperGesture(MotionEvent event) {
+        if (event == null || webView == null || !"page".equals(readingMode) ||
+                !"paper".equals(pageAnimation) || currentSelection != null) return false;
+
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            resetPaperGestureState();
+            if (chapterLoading || pageTurnLocked || (pageCurlView != null && pageCurlView.isBusy())) return false;
+
+            paperGestureCandidate = true;
+            paperDownX = event.getX();
+            paperDownY = event.getY();
+            paperTouchY = webView.getHeight() <= 0 ? 0.5f :
+                    Math.max(0f, Math.min(1f, event.getY() / (float) webView.getHeight()));
+            pageVelocityTracker = VelocityTracker.obtain();
+            pageVelocityTracker.addMovement(event);
+            return false;
+        }
+
+        if (!paperGestureCandidate && !paperGestureActive) return false;
+        if (pageVelocityTracker != null) pageVelocityTracker.addMovement(event);
+
+        if (action == MotionEvent.ACTION_MOVE) {
+            float dx = event.getX() - paperDownX;
+            float dy = event.getY() - paperDownY;
+
+            if (!paperGestureActive) {
+                if (Math.abs(dx) < pageTouchSlop) return false;
+                if (Math.abs(dx) < Math.abs(dy) * 1.15f) {
+                    resetPaperGestureState();
+                    return false;
+                }
+
+                int direction = dx < 0f ? 1 : -1;
+                int targetPage = currentPageInChapter + direction;
+                if (targetPage < 1 || targetPage > pageCountInChapter) {
+                    // Let the existing fling/chapter path handle chapter boundaries.
+                    resetPaperGestureState();
+                    return false;
+                }
+
+                if (!beginInteractivePaperTurn(direction, targetPage - 1)) {
+                    resetPaperGestureState();
+                    return false;
+                }
+                paperGestureActive = true;
+            }
+
+            float width = Math.max(1f, webView.getWidth());
+            paperProgress = Math.max(0f, Math.min(1f, Math.abs(dx) / (width * 0.94f)));
+            paperTouchY = webView.getHeight() <= 0 ? 0.5f :
+                    Math.max(0.08f, Math.min(0.92f, event.getY() / (float) webView.getHeight()));
+
+            if (paperGestureReady && pageCurlView != null) {
+                pageCurlView.updateInteractive(paperProgress, paperTouchY);
+            }
+            return true;
+        }
+
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (!paperGestureActive) {
+                resetPaperGestureState();
+                return false;
+            }
+
+            float velocityX = 0f;
+            if (pageVelocityTracker != null) {
+                pageVelocityTracker.computeCurrentVelocity(1000);
+                velocityX = pageVelocityTracker.getXVelocity();
+            }
+            paperReleaseVelocityX = velocityX;
+
+            float width = Math.max(1f, webView.getWidth());
+            float towardTurn = (-paperGestureDirection * velocityX) / width;
+            float projected = paperProgress + towardTurn * 0.115f;
+            boolean commit = action != MotionEvent.ACTION_CANCEL && projected >= 0.42f;
+
+            paperGestureCommit = commit;
+            paperGestureReleased = true;
+            recyclePageVelocityTracker();
+
+            if (paperGestureReady) settlePaperGesture();
+            return true;
+        }
+
+        return paperGestureActive;
+    }
+
+    private boolean beginInteractivePaperTurn(int direction, int targetZeroBased) {
+        if (pageCurlView == null || webView == null) return false;
+        Bitmap current = captureWebViewBitmap();
+        if (current == null) return false;
+
+        paperGestureDirection = direction < 0 ? -1 : 1;
+        paperOriginalPageZero = Math.max(0, currentPageInChapter - 1);
+        paperTargetPageZero = Math.max(0, targetZeroBased);
+        paperGestureReady = false;
+        paperGestureReleased = false;
+        paperGestureCommit = false;
+        paperProgress = 0f;
+        pageTurnLocked = true;
+        lastPageTurnMs = System.currentTimeMillis();
+        pageCurlView.hold(current);
+
+        String jump = "(function(){var st=window.__wowPageEngine;if(!st||st.mode!=='page')return 'unavailable';" +
+                "st.locked=true;st.page=st.clamp(" + paperTargetPageZero +
+                ",0,(st.count||1)-1);st.apply(false);return 'ok';})()";
+        try {
+            webView.evaluateJavascript(jump, result -> {
+                if (result == null || result.contains("unavailable")) {
+                    if (pageCurlView != null) pageCurlView.release();
+                    pageTurnLocked = false;
+                    resetPaperGestureState();
+                    return;
+                }
+
+                webView.postOnAnimation(() -> webView.postOnAnimation(() -> {
+                    if (!paperGestureActive && !paperGestureReleased) {
+                        restorePaperOriginalPage();
+                        return;
+                    }
+                    Bitmap target = captureWebViewBitmap();
+                    if (target == null || pageCurlView == null) {
+                        restorePaperOriginalPage();
+                        return;
+                    }
+
+                    pageCurlView.beginInteractive(target, paperGestureDirection,
+                            paperProgress, paperTouchY);
+                    paperGestureReady = true;
+                    if (paperGestureReleased) settlePaperGesture();
+                }));
+            });
+            return true;
+        } catch (Exception e) {
+            if (pageCurlView != null) pageCurlView.release();
+            pageTurnLocked = false;
+            return false;
+        }
+    }
+
+    private void settlePaperGesture() {
+        if (!paperGestureReady || pageCurlView == null) return;
+        paperGestureReady = false;
+        boolean commit = paperGestureCommit;
+        float velocityX = paperReleaseVelocityX;
+
+        pageCurlView.settleInteractive(commit, velocityX, () -> {
+            if (commit) {
+                finishNativePageCurl();
+            } else {
+                restorePaperOriginalPage();
+            }
+        });
+    }
+
+    private void restorePaperOriginalPage() {
+        if (webView == null) {
+            if (pageCurlView != null) pageCurlView.release();
+            pageTurnLocked = false;
+            resetPaperGestureState();
+            return;
+        }
+
+        String restore = "(function(){var st=window.__wowPageEngine;if(!st)return;" +
+                "st.page=st.clamp(" + paperOriginalPageZero +
+                ",0,(st.count||1)-1);st.apply(false);st.locked=false;})()";
+        try {
+            webView.evaluateJavascript(restore, result -> webView.postOnAnimation(() -> {
+                if (pageCurlView != null) pageCurlView.release();
+                pageTurnLocked = false;
+                resetPaperGestureState();
+            }));
+        } catch (Exception e) {
+            if (pageCurlView != null) pageCurlView.release();
+            pageTurnLocked = false;
+            resetPaperGestureState();
+        }
+    }
+
+    private void recyclePageVelocityTracker() {
+        if (pageVelocityTracker != null) {
+            pageVelocityTracker.recycle();
+            pageVelocityTracker = null;
+        }
+    }
+
+    private void resetPaperGestureState() {
+        recyclePageVelocityTracker();
+        paperGestureCandidate = false;
+        paperGestureActive = false;
+        paperGestureReady = false;
+        paperGestureReleased = false;
+        paperGestureCommit = false;
+        paperGestureDirection = 0;
+        paperProgress = 0f;
+        paperReleaseVelocityX = 0f;
+        paperTouchY = 0.5f;
+    }
+
     private void turnPage(int delta) {
         if (webView == null || chapterLoading || !"page".equals(readingMode) || delta == 0) return;
         long now = System.currentTimeMillis();
@@ -1392,6 +1613,7 @@ public class BookReaderActivity extends Activity {
                     null);
         } catch (Exception ignored) {}
         pageTurnLocked = false;
+        resetPaperGestureState();
     }
 
     private void performJsPageTurn(int delta) {
@@ -1608,7 +1830,7 @@ public class BookReaderActivity extends Activity {
     }
 
     private void showPageAnimationDialog() {
-        String[] labels = {"Natural paper · default", "Smooth slide", "None"};
+        String[] labels = {"3D page curl · default", "Smooth slide", "None"};
         String[] values = {"paper", "slide", "none"};
         int selected = "slide".equals(pageAnimation) ? 1 : ("none".equals(pageAnimation) ? 2 : 0);
         new AlertDialog.Builder(this)
