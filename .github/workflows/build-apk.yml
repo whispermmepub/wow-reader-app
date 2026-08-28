@@ -56,7 +56,7 @@ jobs:
           grep -q "versionCode 24" app/build.gradle
           grep -q "versionName '2.12.0'" app/build.gradle
           grep -q "androidx.recyclerview:recyclerview:1.3.2" app/build.gradle
-          grep -q "play-services-auth:21.4.0" app/build.gradle
+          grep -q "play-services-auth:21.5.0" app/build.gradle
           MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
           READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           CURL=app/src/main/java/com/whisper/wowreader/PageCurlView.java
