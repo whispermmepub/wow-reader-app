@@ -1,0 +1,56 @@
+name: Apply WoW Reader v2.9
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v290.py'
+      - '.github/workflows/apply-v290.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Apply v2.9 changes
+        run: python tools/apply_v290.py
+
+      - name: Validate migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "versionCode 21" app/build.gradle
+          grep -q "versionName '2.9.0'" app/build.gradle
+          MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
+          READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "calculateLibraryColumns" "$MAIN"
+          grep -q "minCardDp = 154f" "$MAIN"
+          grep -q "updateLibraryColumnsForWidth" "$MAIN"
+          grep -q "setDecorFitsSystemWindows(false)" "$READER"
+          grep -q "BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE" "$READER"
+          grep -q "WindowInsets.Type.statusBars" "$READER"
+          grep -q "onWindowFocusChanged" "$READER"
+          grep -q "LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES" "$READER"
+          git diff --check
+
+      - name: Commit v2.9 app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+          else
+            git commit -m 'WoW Reader v2.9.0 true immersive reader and adaptive library'
+            git push origin HEAD:main
+          fi
