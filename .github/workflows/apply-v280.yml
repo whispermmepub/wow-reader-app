@@ -1,0 +1,52 @@
+name: Apply WoW Reader v2.8
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v280.py'
+      - '.github/workflows/apply-v280.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Apply v2.8 changes
+        run: python tools/apply_v280.py
+
+      - name: Validate migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "versionCode 20" app/build.gradle
+          grep -q "versionName '2.8.0'" app/build.gradle
+          grep -q "ExploreLogoView" app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'Add book' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q "onSingleTapUp" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "turnPageFromTap" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "startNativeTapCurl" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "startTapCurl" app/src/main/java/com/whisper/wowreader/PageCurlView.java
+          grep -q "projected >= 0.23f" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+
+      - name: Commit v2.8 app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit'
+          else
+            git commit -m 'WoW Reader v2.8.0 smoother navigation and Explore logos'
+            git push origin HEAD:main
+          fi
