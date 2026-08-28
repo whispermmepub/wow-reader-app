@@ -33,12 +33,12 @@ jobs:
           grep -q "versionName '2.5.0'" app/build.gradle
           git diff --check
 
-      - name: Commit v2.5 source
+      - name: Commit v2.5 app source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app .github/workflows/build-apk.yml
+          git add app
           git commit -m 'Add interactive 3D page curl for v2.5.0'
           git push origin HEAD:main
