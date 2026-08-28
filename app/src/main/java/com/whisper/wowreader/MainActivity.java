@@ -784,7 +784,8 @@ public class MainActivity extends Activity {
         for (File f : files) {
             String author = cachedLibraryAuthor(f);
             if (author.isEmpty()) continue;
-            counts.put(author, counts.getOrDefault(author, 0) + 1);
+            Integer oldCount = counts.get(author);
+            counts.put(author, (oldCount == null ? 0 : oldCount) + 1);
         }
         java.util.List<String> authors = new java.util.ArrayList<>(counts.keySet());
         authors.sort((a, b) -> {
