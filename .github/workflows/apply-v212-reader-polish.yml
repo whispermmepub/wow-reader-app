@@ -1,0 +1,53 @@
+name: Apply WoW Reader v2.12 Reader Polish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/patch_v212_reader_polish.py'
+      - '.github/workflows/apply-v212-reader-polish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply reader polish
+        run: python3 tools/patch_v212_reader_polish.py
+
+      - name: Validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
+          READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'Opening book…' "$READER"
+          grep -q 'hideInitialReaderLoading' "$READER"
+          grep -q 'wow-reader-block{line-height:' "$READER"
+          grep -q 'String\[\] animLabels = {"None", "Slide"}' "$READER"
+          grep -q 'String\[\] labels = {"None · default", "Smooth slide"}' "$READER"
+          ! grep -q '"3D page curl"' "$READER"
+          ! grep -q 'accountButton = iconButton("G")' "$MAIN"
+          ! grep -q 'maybeAutoGoogleSync();' "$MAIN"
+          grep -q 'showAuthorsDialog' "$MAIN"
+          grep -q 'java.util.Collections.sort(authors' "$MAIN"
+          git diff --check
+
+      - name: Commit reader polish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/whisper/wowreader/BookReaderActivity.java app/src/main/java/com/whisper/wowreader/MainActivity.java
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Polish reader loading and typography in v2.12'
+          git push origin HEAD:main
