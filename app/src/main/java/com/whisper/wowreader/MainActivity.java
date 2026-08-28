@@ -788,7 +788,7 @@ public class MainActivity extends Activity {
             counts.put(author, (oldCount == null ? 0 : oldCount) + 1);
         }
         java.util.List<String> authors = new java.util.ArrayList<>(counts.keySet());
-        authors.sort((a, b) -> {
+        java.util.Collections.sort(authors, (a, b) -> {
             int ga = titleScriptGroup(a), gb = titleScriptGroup(b);
             if (ga != gb) return Integer.compare(ga, gb);
             return ga == 0 ? myanmarCollator.compare(a, b) : englishCollator.compare(a, b);
