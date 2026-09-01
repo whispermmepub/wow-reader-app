@@ -1,4 +1,4 @@
-name: Build WoW Reader APK
+name: Build WoW Reader v2.13 APK
 
 on:
   push:
@@ -70,6 +70,7 @@ jobs:
           grep -q 'startNativeSlidePageTurn' "$READER"
           grep -q 'pageSlideOverlay' "$READER"
           grep -q 'prewarmAdjacentChapters' "$READER"
+          grep -q 'import java.io.InputStream;' "$READER"
           grep -q 'setDuration(115L)' "$READER"
           grep -q 'app_theme' "$SPLASH"
           grep -q 'setDecorFitsSystemWindows(false)' "$READER"
