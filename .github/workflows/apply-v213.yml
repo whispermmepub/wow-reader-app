@@ -1,0 +1,43 @@
+name: Apply WoW Reader v2.13
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v213.py'
+      - '.github/workflows/apply-v213.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Apply v2.13
+        run: python tools/apply_v213.py
+      - name: Validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "versionCode 25" app/build.gradle
+          grep -q "versionName '2.13.0'" app/build.gradle
+          grep -q 'showAppThemeDialog' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'Navy Premium' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'library_owned_' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'startNativeSlidePageTurn' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'prewarmAdjacentChapters' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'app_theme' app/src/main/java/com/whisper/wowreader/SplashActivity.java
+          git diff --check
+      - name: Commit v2.13
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle app/src/main/java/com/whisper/wowreader/MainActivity.java app/src/main/java/com/whisper/wowreader/BookReaderActivity.java app/src/main/java/com/whisper/wowreader/SplashActivity.java
+          git commit -m "Add v2.13 themes and smoother reader motion"
+          git push
