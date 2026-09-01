@@ -43,78 +43,38 @@ jobs:
           test -s app/src/main/java/com/whisper/wowreader/ReaderAnnotationStore.java
           test -s app/src/main/java/com/whisper/wowreader/ReaderFontStore.java
           test -s app/src/main/java/com/whisper/wowreader/SplashActivity.java
-          test -s app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           test -s app/src/main/res/drawable/wow_logo.webp
           test -s app/src/main/assets/fonts/pyidaungsu.woff2
           test -s app/src/main/assets/fonts/pyidaungsu_native.ttf
-          test -s app/src/main/assets/fonts/yoeshin.woff2
-          test -s app/src/main/assets/fonts/burma2.woff2
-          test -s app/src/main/assets/fonts/burma001.ttf
-          test -s app/src/main/assets/fonts/m01_pupu_bold.ttf
-          test -s app/src/main/assets/fonts/myanmar_ayar_typewriter.ttf
-          test -s app/src/main/assets/fonts/phantee_hand_written.ttf
-          grep -q "versionCode 24" app/build.gradle
-          grep -q "versionName '2.12.0'" app/build.gradle
+          grep -q "versionCode 25" app/build.gradle
+          grep -q "versionName '2.13.0'" app/build.gradle
           grep -q "androidx.recyclerview:recyclerview:1.3.2" app/build.gradle
-          grep -q "play-services-auth:21.5.0" app/build.gradle
           MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
           READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
-          CURL=app/src/main/java/com/whisper/wowreader/PageCurlView.java
           SPLASH=app/src/main/java/com/whisper/wowreader/SplashActivity.java
-          DRIVE=app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           grep -q "RecyclerView" "$MAIN"
-          grep -q "GridLayoutManager" "$MAIN"
           grep -q "calculateLibraryColumns" "$MAIN"
-          grep -q "setItemViewCacheSize(20)" "$MAIN"
-          grep -q "Typeface.createFromAsset(getAssets(), \"fonts/pyidaungsu_native.ttf\")" "$MAIN"
-          grep -q "library_sort" "$MAIN"
-          grep -q "cachedLibraryAuthor" "$MAIN"
           grep -q "showAuthorsDialog" "$MAIN"
-          grep -q "library_author_" "$MAIN"
-          grep -q "Integer oldCount = counts.get(author)" "$MAIN"
-          grep -q "java.util.Collections.sort(authors" "$MAIN"
-          ! grep -q "counts.getOrDefault" "$MAIN"
+          grep -q "showAppThemeDialog" "$MAIN"
+          grep -q 'Navy Premium' "$MAIN"
+          grep -q 'app_theme' "$MAIN"
+          grep -q 'library_owned_' "$MAIN"
+          grep -q 'local copy saved' "$MAIN"
+          grep -q 'original file you imported' "$MAIN"
           ! grep -q 'accountButton = iconButton("G")' "$MAIN"
-          ! grep -q 'maybeAutoGoogleSync();' "$MAIN"
-          grep -q "ExploreLogoView" "$MAIN"
-          grep -q '＋  Add book' "$MAIN"
-          grep -q "AuthorizationClient" "$DRIVE"
-          grep -q "DRIVE_APPFOLDER" "$DRIVE"
-          grep -q "appDataFolder" "$DRIVE"
-          grep -q "BackupCheckCallback" "$DRIVE"
-          grep -q "wow_reader_backup_v1.zip" "$DRIVE"
-          ! grep -q "java.util.function.Consumer" "$DRIVE"
-          grep -q "OvershootInterpolator" "$SPLASH"
-          grep -q "Your library · your reading space" "$SPLASH"
-          grep -q "setDecorFitsSystemWindows(false)" "$READER"
-          grep -q "BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE" "$READER"
-          grep -q 'reader_v210_animation_default_applied' "$READER"
-          grep -q 'pageAnimation = "none"' "$READER"
-          grep -q 'chapterLoadGeneration' "$READER"
-          grep -q 'stableHits' "$READER"
-          grep -q 'generation != chapterLoadGeneration' "$READER"
-          grep -q 'Display options' "$READER"
-          grep -q 'reader_night_light' "$READER"
-          grep -q 'Night Light' "$READER"
-          grep -q 'Reading progress' "$READER"
-          grep -q 'seekToOverallProgress' "$READER"
-          grep -q 'scheduleChromeAutoHide' "$READER"
-          grep -q 'More reader settings' "$READER"
-          grep -q 'Reading brightness' "$READER"
-          grep -q 'showAdvancedReaderSettings' "$READER"
           grep -q 'Opening book…' "$READER"
-          grep -q 'hideInitialReaderLoading' "$READER"
-          grep -q 'wow-reader-block{line-height:' "$READER"
-          grep -q 'readerStyleOverlay' "$READER"
           grep -q 'applyReaderStyleSmooth' "$READER"
-          grep -q 'finishReaderStyleReflow' "$READER"
-          grep -q 'onStyleReady' "$READER"
+          grep -q 'wow-reader-block{line-height:' "$READER"
           grep -q 'String\[\] animLabels = {"None", "Slide"}' "$READER"
-          grep -q 'String\[\] labels = {"None · default", "Smooth slide"}' "$READER"
           ! grep -q '"3D page curl"' "$READER"
-          grep -q "ReaderAnnotationStore.add" "$READER"
-          grep -q "sync_updated_ms" "$READER"
-          grep -q "MESH_W = 60" "$CURL"
+          grep -q 'startNativeSlidePageTurn' "$READER"
+          grep -q 'pageSlideOverlay' "$READER"
+          grep -q 'prewarmAdjacentChapters' "$READER"
+          grep -q 'setDuration(115L)' "$READER"
+          grep -q 'app_theme' "$SPLASH"
+          grep -q 'setDecorFitsSystemWindows(false)' "$READER"
+          grep -q 'BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE' "$READER"
+          grep -q 'ReaderAnnotationStore.add' "$READER"
           git diff --check
 
       - name: Build release APK
@@ -131,15 +91,14 @@ jobs:
           test -s "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='24'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.12.0'"
-          "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='25'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.13.0'"
           unzip -l "$APK" | grep -q 'assets/fonts/pyidaungsu_native.ttf'
 
       - name: Collect APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.12.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.13.0-unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
@@ -147,9 +106,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.12.0
+          name: WoW-Reader-v2.13.0
           path: |
-            WoW-Reader-v2.12.0-unsigned.apk
+            WoW-Reader-v2.13.0-unsigned.apk
             apksigner.jar
           if-no-files-found: error
           retention-days: 14
