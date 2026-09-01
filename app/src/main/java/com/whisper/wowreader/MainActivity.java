@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
     private TextView sortButton;
     private TextView authorButton;
     private TextView accountButton;
+    private TextView themeButton;
+    private String appTheme = "white";
     private String sortMode = "added";
     private String authorFilter = "";
     private GoogleDriveSync googleDrive;
@@ -89,6 +91,9 @@ public class MainActivity extends Activity {
         if (!libraryDir.exists()) libraryDir.mkdirs();
         if (!coverCacheDir.exists()) coverCacheDir.mkdirs();
         prefs = getSharedPreferences("wow_reader", MODE_PRIVATE);
+        appTheme = prefs.getString("app_theme", "white");
+        if (!"white".equals(appTheme) && !"black".equals(appTheme) && !"navy".equals(appTheme)) appTheme = "white";
+        applySystemBarTheme();
         // Google account / Drive sync is intentionally deferred for a later release.
         gridMode = prefs.getBoolean("library_grid", true);
         sortMode = prefs.getString("library_sort", "added");
@@ -114,7 +119,7 @@ public class MainActivity extends Activity {
 
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(247, 248, 251));
+        root.setBackgroundColor(themeBackground());
 
         libraryRecycler = new RecyclerView(this);
         libraryRecycler.setBackgroundColor(Color.TRANSPARENT);
@@ -150,8 +155,7 @@ public class MainActivity extends Activity {
         floatingAdd.setGravity(Gravity.CENTER);
         floatingAdd.setPadding(dp(14), 0, dp(16), 0);
         floatingAdd.setContentDescription("Add book");
-        floatingAdd.setBackground(gradientRoundRect(new int[]{
-                Color.rgb(92, 76, 226), Color.rgb(71, 113, 236)}, dp(29)));
+        floatingAdd.setBackground(gradientRoundRect(themeFabColors(), dp(29)));
         floatingAdd.setElevation(dp(11));
         floatingAdd.setOnClickListener(v -> {
             try { v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch (Exception ignored) {}
@@ -199,9 +203,9 @@ public class MainActivity extends Activity {
         TextView v = new TextView(this);
         v.setText(text);
         v.setTextSize(20);
-        v.setTextColor(Color.rgb(52, 55, 62));
+        v.setTextColor(themePrimaryText());
         v.setGravity(Gravity.CENTER);
-        v.setBackground(roundRect(Color.argb(188, 255, 255, 255), dp(22), dp(1), Color.argb(80, 210, 214, 222)));
+        v.setBackground(roundRect(themeControlSurface(), dp(22), dp(1), themeStroke()));
         v.setClickable(true);
         v.setElevation(dp(1));
         return v;
@@ -212,7 +216,7 @@ public class MainActivity extends Activity {
         TextView heading = new TextView(this);
         heading.setText("Explore");
         heading.setTextSize(14);
-        heading.setTextColor(Color.rgb(74, 78, 88));
+        heading.setTextColor(themeSecondaryText());
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         heading.setPadding(dp(2), dp(12), dp(2), dp(8));
         root.addView(heading, new LinearLayout.LayoutParams(
@@ -253,7 +257,7 @@ public class MainActivity extends Activity {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(10), dp(9), dp(8), dp(9));
-        card.setBackground(roundRect(background, dp(18), dp(1), Color.argb(46, 80, 88, 105)));
+        card.setBackground(roundRect(themeDiscoverySurface(background), dp(18), dp(1), themeStroke()));
         card.setClickable(true);
         card.setElevation(dp(1));
         card.setOnClickListener(v -> openExternal(url));
@@ -275,12 +279,12 @@ public class MainActivity extends Activity {
         t.setText(title);
         t.setTextSize(12.5f);
         t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        t.setTextColor(Color.rgb(35, 38, 45));
+        t.setTextColor(themePrimaryText());
         t.setMaxLines(1);
         TextView sub = new TextView(this);
         sub.setText(subtitle);
         sub.setTextSize(9.5f);
-        sub.setTextColor(Color.rgb(99, 104, 116));
+        sub.setTextColor(themeSecondaryText());
         sub.setMaxLines(1);
         copy.addView(t);
         copy.addView(sub);
@@ -454,7 +458,7 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(7), dp(7), dp(7), dp(9));
-        card.setBackground(roundRect(Color.WHITE, dp(18), dp(1), Color.rgb(232, 234, 240)));
+        card.setBackground(roundRect(themeCardSurface(), dp(18), dp(1), themeStroke()));
         card.setElevation(dp(1));
         card.setClickable(true);
         card.setOnClickListener(v -> openBook(file));
@@ -480,7 +484,7 @@ public class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText(initial);
         title.setTextSize(14.5f);
-        title.setTextColor(Color.rgb(29, 31, 37));
+        title.setTextColor(themePrimaryText());
         applyBookTitleTypeface(title);
         title.setMaxLines(2);
         title.setLineSpacing(0f, 1.05f);
@@ -491,16 +495,16 @@ public class MainActivity extends Activity {
         TextView meta = new TextView(this);
         meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "%");
         meta.setTextSize(10.5f);
-        meta.setTextColor(Color.rgb(103, 108, 120));
+        meta.setTextColor(themeSecondaryText());
         meta.setSingleLine(true);
         meta.setPadding(dp(2), dp(5), dp(2), dp(6));
         card.addView(meta);
 
         LinearLayout track = new LinearLayout(this);
         track.setGravity(Gravity.START);
-        track.setBackground(roundRect(Color.rgb(236, 238, 243), dp(2), 0, 0));
+        track.setBackground(roundRect(themeTrackColor(), dp(2), 0, 0));
         View fill = new View(this);
-        fill.setBackground(roundRect(Color.rgb(82, 82, 214), dp(2), 0, 0));
+        fill.setBackground(roundRect(themeAccent(), dp(2), 0, 0));
         int trackWidth = Math.max(1, innerWidth - dp(2));
         track.addView(fill, new LinearLayout.LayoutParams(Math.max(0, Math.round(trackWidth * progress / 100f)), dp(3)));
         card.addView(track, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
@@ -515,7 +519,7 @@ public class MainActivity extends Activity {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(10), dp(10), dp(12), dp(10));
-        card.setBackground(roundRect(Color.WHITE, dp(18), dp(1), Color.rgb(232, 234, 240)));
+        card.setBackground(roundRect(themeCardSurface(), dp(18), dp(1), themeStroke()));
         card.setElevation(dp(1));
         card.setOnClickListener(v -> openBook(file));
         card.setOnLongClickListener(v -> { confirmDelete(file); return true; });
@@ -546,7 +550,7 @@ public class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText(initial);
         title.setTextSize(16);
-        title.setTextColor(Color.rgb(29, 31, 37));
+        title.setTextColor(themePrimaryText());
         applyBookTitleTypeface(title);
         title.setMaxLines(2);
         text.addView(title);
@@ -555,14 +559,14 @@ public class MainActivity extends Activity {
         TextView meta = new TextView(this);
         meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "% read");
         meta.setTextSize(12);
-        meta.setTextColor(Color.rgb(103, 108, 120));
+        meta.setTextColor(themeSecondaryText());
         meta.setPadding(0, dp(7), 0, 0);
         text.addView(meta);
 
         TextView action = new TextView(this);
         action.setText(progress > 0 ? "Continue reading  ›" : "Start reading  ›");
         action.setTextSize(12.5f);
-        action.setTextColor(Color.rgb(82, 82, 214));
+        action.setTextColor(themeAccent());
         action.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         action.setPadding(0, dp(10), 0, 0);
         text.addView(action);
@@ -638,7 +642,7 @@ public class MainActivity extends Activity {
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setPadding(dp(16), dp(14), dp(12), dp(14));
-        hero.setBackground(gradientRoundRect(new int[]{Color.rgb(239, 243, 255), Color.rgb(255, 247, 242)}, dp(24)));
+        hero.setBackground(gradientRoundRect(themeHeroColors(), dp(24)));
 
         LinearLayout brandRow = new LinearLayout(this);
         brandRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -648,16 +652,22 @@ public class MainActivity extends Activity {
         TextView brand = new TextView(this);
         brand.setText("WoW Reader");
         brand.setTextSize(27);
-        brand.setTextColor(Color.rgb(27, 29, 35));
+        brand.setTextColor(themePrimaryText());
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         TextView sub = new TextView(this);
         sub.setText("Your books, beautifully organized");
         sub.setTextSize(11.5f);
-        sub.setTextColor(Color.rgb(100, 104, 116));
+        sub.setTextColor(themeSecondaryText());
         sub.setPadding(0, dp(2), 0, 0);
         brandCopy.addView(brand);
         brandCopy.addView(sub);
         brandRow.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        themeButton = iconButton("navy".equals(appTheme) ? "✦" : "◐");
+        themeButton.setTextSize(17);
+        themeButton.setContentDescription("App theme");
+        themeButton.setOnClickListener(v -> showAppThemeDialog());
+        brandRow.addView(themeButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         viewModeButton = iconButton(gridMode ? "☷" : "▦");
         viewModeButton.setTextSize(17);
@@ -678,10 +688,10 @@ public class MainActivity extends Activity {
         searchInput.setSingleLine(true);
         searchInput.setHint("Search title or book");
         searchInput.setTextSize(14.5f);
-        searchInput.setTextColor(Color.rgb(31, 34, 40));
-        searchInput.setHintTextColor(Color.rgb(118, 123, 136));
+        searchInput.setTextColor(themePrimaryText());
+        searchInput.setHintTextColor(themeSecondaryText());
         searchInput.setPadding(dp(16), 0, dp(16), 0);
-        searchInput.setBackground(roundRect(Color.argb(218, 255, 255, 255), dp(23), dp(1), Color.argb(70, 180, 185, 198)));
+        searchInput.setBackground(roundRect(themeSearchSurface(), dp(23), dp(1), themeStroke()));
         if (!searchQuery.isEmpty()) {
             searchInput.setText(searchQuery);
             searchInput.setSelection(searchInput.length());
@@ -714,13 +724,13 @@ public class MainActivity extends Activity {
         TextView label = new TextView(this);
         label.setText("Library");
         label.setTextSize(18);
-        label.setTextColor(Color.rgb(31, 34, 40));
+        label.setTextColor(themePrimaryText());
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         copy.addView(label);
 
         countView = new TextView(this);
         countView.setTextSize(10.5f);
-        countView.setTextColor(Color.rgb(112, 116, 128));
+        countView.setTextColor(themeSecondaryText());
         countView.setPadding(0, dp(1), 0, 0);
         copy.addView(countView);
         row.addView(copy, new LinearLayout.LayoutParams(0, dp(48), 1f));
@@ -728,12 +738,12 @@ public class MainActivity extends Activity {
         sortButton = new TextView(this);
         sortButton.setText(sortButtonLabel());
         sortButton.setTextSize(11.5f);
-        sortButton.setTextColor(Color.rgb(67, 68, 190));
+        sortButton.setTextColor(themeAccent());
         sortButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         sortButton.setGravity(Gravity.CENTER);
         sortButton.setPadding(dp(12), 0, dp(12), 0);
         sortButton.setSingleLine(true);
-        sortButton.setBackground(roundRect(Color.argb(220, 255, 255, 255), dp(19), dp(1), Color.argb(72, 126, 126, 210)));
+        sortButton.setBackground(roundRect(themeControlSurface(), dp(19), dp(1), themeStroke()));
         sortButton.setElevation(dp(1));
         sortButton.setOnClickListener(v -> showSortDialog());
         sortButton.setOnTouchListener((v, e) -> {
@@ -746,14 +756,14 @@ public class MainActivity extends Activity {
         authorButton = new TextView(this);
         authorButton.setText(authorButtonLabel());
         authorButton.setTextSize(11.5f);
-        authorButton.setTextColor(Color.rgb(67, 68, 190));
+        authorButton.setTextColor(themeAccent());
         authorButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         authorButton.setGravity(Gravity.CENTER);
         authorButton.setPadding(dp(10), 0, dp(10), 0);
         authorButton.setSingleLine(true);
         authorButton.setMaxWidth(dp(126));
         authorButton.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        authorButton.setBackground(roundRect(Color.argb(220, 255, 255, 255), dp(19), dp(1), Color.argb(72, 126, 126, 210)));
+        authorButton.setBackground(roundRect(themeControlSurface(), dp(19), dp(1), themeStroke()));
         authorButton.setOnClickListener(v -> showAuthorsDialog());
         LinearLayout.LayoutParams authorLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38));
         authorLp.rightMargin = dp(7);
@@ -833,10 +843,111 @@ public class MainActivity extends Activity {
     private View buildEmptyState() {
         TextView empty = new TextView(this);
         empty.setTextSize(15);
-        empty.setTextColor(Color.rgb(104, 109, 121));
+        empty.setTextColor(themeSecondaryText());
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(30), dp(72), dp(30), dp(96));
         return empty;
+    }
+
+    private boolean isBlackAppTheme() { return "black".equals(appTheme); }
+    private boolean isNavyAppTheme() { return "navy".equals(appTheme); }
+
+    private int themeBackground() {
+        if (isBlackAppTheme()) return Color.rgb(12, 13, 16);
+        if (isNavyAppTheme()) return Color.rgb(3, 28, 48);
+        return Color.rgb(247, 248, 251);
+    }
+
+    private int themeCardSurface() {
+        if (isBlackAppTheme()) return Color.rgb(27, 29, 34);
+        if (isNavyAppTheme()) return Color.rgb(7, 44, 70);
+        return Color.WHITE;
+    }
+
+    private int themeControlSurface() {
+        if (isBlackAppTheme()) return Color.rgb(35, 37, 43);
+        if (isNavyAppTheme()) return Color.rgb(10, 51, 79);
+        return Color.argb(232, 255, 255, 255);
+    }
+
+    private int themeSearchSurface() {
+        if (isBlackAppTheme()) return Color.rgb(28, 30, 35);
+        if (isNavyAppTheme()) return Color.rgb(6, 42, 67);
+        return Color.argb(232, 255, 255, 255);
+    }
+
+    private int themePrimaryText() {
+        return (isBlackAppTheme() || isNavyAppTheme()) ? Color.rgb(244, 247, 250) : Color.rgb(31, 34, 40);
+    }
+
+    private int themeSecondaryText() {
+        if (isBlackAppTheme()) return Color.rgb(178, 183, 192);
+        if (isNavyAppTheme()) return Color.rgb(165, 196, 213);
+        return Color.rgb(105, 110, 122);
+    }
+
+    private int themeAccent() {
+        if (isBlackAppTheme()) return Color.rgb(151, 166, 255);
+        if (isNavyAppTheme()) return Color.rgb(239, 194, 91);
+        return Color.rgb(82, 82, 214);
+    }
+
+    private int themeStroke() {
+        if (isBlackAppTheme()) return Color.rgb(55, 59, 68);
+        if (isNavyAppTheme()) return Color.rgb(26, 91, 120);
+        return Color.rgb(224, 227, 234);
+    }
+
+    private int themeTrackColor() {
+        if (isBlackAppTheme()) return Color.rgb(50, 53, 61);
+        if (isNavyAppTheme()) return Color.rgb(18, 67, 91);
+        return Color.rgb(236, 238, 243);
+    }
+
+    private int[] themeHeroColors() {
+        if (isBlackAppTheme()) return new int[]{Color.rgb(30, 32, 39), Color.rgb(19, 20, 25)};
+        if (isNavyAppTheme()) return new int[]{Color.rgb(4, 45, 73), Color.rgb(2, 29, 51), Color.rgb(4, 52, 74)};
+        return new int[]{Color.rgb(239, 243, 255), Color.rgb(255, 247, 242)};
+    }
+
+    private int[] themeFabColors() {
+        if (isBlackAppTheme()) return new int[]{Color.rgb(104, 91, 226), Color.rgb(63, 79, 170)};
+        if (isNavyAppTheme()) return new int[]{Color.rgb(8, 174, 199), Color.rgb(10, 105, 145)};
+        return new int[]{Color.rgb(92, 76, 226), Color.rgb(71, 113, 236)};
+    }
+
+    private int themeDiscoverySurface(int lightFallback) {
+        if (isBlackAppTheme()) return Color.rgb(29, 32, 38);
+        if (isNavyAppTheme()) return Color.rgb(7, 49, 77);
+        return lightFallback;
+    }
+
+    private void applySystemBarTheme() {
+        int bg = themeBackground();
+        getWindow().setStatusBarColor(bg);
+        getWindow().setNavigationBarColor(bg);
+        int flags = 0;
+        if (!isBlackAppTheme() && !isNavyAppTheme()) flags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(flags);
+    }
+
+    private void showAppThemeDialog() {
+        String[] labels = {"White", "Black", "Navy Premium"};
+        String[] values = {"white", "black", "navy"};
+        int selected = isBlackAppTheme() ? 1 : (isNavyAppTheme() ? 2 : 0);
+        new AlertDialog.Builder(this)
+                .setTitle("App theme")
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    String chosen = values[which];
+                    if (!chosen.equals(appTheme)) {
+                        appTheme = chosen;
+                        prefs.edit().putString("app_theme", appTheme).apply();
+                        dialog.dismiss();
+                        recreate();
+                    } else dialog.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private GradientDrawable gradientRoundRect(int[] colors, int radius) {
@@ -960,10 +1071,11 @@ public class MainActivity extends Activity {
                         .putLong("added_at_"+out.getName(),System.currentTimeMillis())
                         .putString("library_title_"+out.getName(),displayTitle)
                         .putString("library_author_"+out.getName(),displayAuthor)
+                        .putBoolean("library_owned_"+out.getName(),true)
                         .putLong("sync_updated_ms",System.currentTimeMillis())
                         .apply();
                 runOnUiThread(()->{
-                    Toast.makeText(this,"Added to Library",Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this,"Added to Library · local copy saved",Toast.LENGTH_SHORT).show();
                     refreshLibrary();
                     maybeAutoGoogleSync();
                 });
@@ -982,7 +1094,7 @@ public class MainActivity extends Activity {
     private String queryDisplayName(Uri uri){ if("file".equalsIgnoreCase(uri.getScheme()))return new File(uri.getPath()).getName(); Cursor c=null; try{c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null);if(c!=null&&c.moveToFirst())return c.getString(0);}catch(Exception ignored){}finally{if(c!=null)c.close();}return null; }
     private File uniqueFile(String originalName){ String safe=originalName.replaceAll("[\\\\/:*?\"<>|]","_"); File f=new File(libraryDir,safe);if(!f.exists())return f;int dot=safe.lastIndexOf('.');String base=dot>0?safe.substring(0,dot):safe,ext=dot>0?safe.substring(dot):"";return new File(libraryDir,base+"_"+System.currentTimeMillis()+ext); }
     private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out);}
-    private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from library?").setMessage(stripExtension(file.getName())).setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).remove("library_title_"+file.getName()).remove("library_author_"+file.getName()).remove("added_at_"+file.getName()).remove("last_opened_"+file.getName()).putLong("sync_updated_ms",System.currentTimeMillis()).apply();refreshLibrary();maybeAutoGoogleSync();}}).show();}
+    private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from WoW Reader?").setMessage(stripExtension(file.getName())+"\n\nThis deletes WoW Reader's saved local copy. The original file you imported from Downloads or another folder is not changed.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).remove("library_title_"+file.getName()).remove("library_author_"+file.getName()).remove("library_owned_"+file.getName()).remove("added_at_"+file.getName()).remove("last_opened_"+file.getName()).putLong("sync_updated_ms",System.currentTimeMillis()).apply();refreshLibrary();maybeAutoGoogleSync();}}).show();}
 
     private void restoreStoredGoogleProfile(){
         if(!prefs.getBoolean("google_sync_connected",false)) return;

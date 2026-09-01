@@ -33,16 +33,23 @@ public class SplashActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        int bg = Color.rgb(247, 248, 253);
+        String appTheme = getSharedPreferences("wow_reader", MODE_PRIVATE).getString("app_theme", "white");
+        boolean black = "black".equals(appTheme);
+        boolean navy = "navy".equals(appTheme);
+        int bg = black ? Color.rgb(12, 13, 16) : (navy ? Color.rgb(3, 28, 48) : Color.rgb(247, 248, 253));
         getWindow().setStatusBarColor(bg);
         getWindow().setNavigationBarColor(bg);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        getWindow().getDecorView().setSystemUiVisibility((black || navy) ? 0 :
+                (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR));
 
         FrameLayout root = new FrameLayout(this);
+        int[] splashColors = black
+                ? new int[]{Color.rgb(23, 25, 30), Color.rgb(10, 11, 14), Color.rgb(18, 20, 24)}
+                : (navy
+                ? new int[]{Color.rgb(3, 41, 67), Color.rgb(2, 25, 44), Color.rgb(4, 51, 70)}
+                : new int[]{Color.rgb(242, 245, 255), Color.rgb(252, 248, 255), Color.rgb(255, 248, 242)});
         GradientDrawable background = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.rgb(242, 245, 255), Color.rgb(252, 248, 255), Color.rgb(255, 248, 242)});
+                GradientDrawable.Orientation.TL_BR, splashColors);
         root.setBackground(background);
 
         View glowOne = new View(this);
@@ -67,7 +74,7 @@ public class SplashActivity extends Activity {
 
         FrameLayout logoCard = new FrameLayout(this);
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.argb(238, 255, 255, 255));
+        cardBg.setColor(black ? Color.rgb(31, 34, 40) : (navy ? Color.rgb(7, 48, 75) : Color.argb(238, 255, 255, 255)));
         cardBg.setCornerRadius(dp(31));
         cardBg.setStroke(dp(1), Color.argb(72, 120, 125, 150));
         logoCard.setBackground(cardBg);
@@ -86,7 +93,7 @@ public class SplashActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("WoW Reader");
-        title.setTextColor(Color.rgb(28, 30, 38));
+        title.setTextColor((black || navy) ? Color.rgb(244, 247, 250) : Color.rgb(28, 30, 38));
         title.setTextSize(31);
         title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
@@ -99,7 +106,7 @@ public class SplashActivity extends Activity {
 
         TextView sub = new TextView(this);
         sub.setText("Your library · your reading space");
-        sub.setTextColor(Color.rgb(102, 106, 120));
+        sub.setTextColor(black ? Color.rgb(176, 181, 190) : (navy ? Color.rgb(161, 195, 213) : Color.rgb(102, 106, 120)));
         sub.setTextSize(13.5f);
         sub.setGravity(Gravity.CENTER);
         sub.setAlpha(0f);
@@ -116,12 +123,12 @@ public class SplashActivity extends Activity {
         TextView dot = new TextView(this);
         dot.setText("●");
         dot.setTextSize(8);
-        dot.setTextColor(Color.rgb(83, 82, 211));
+        dot.setTextColor(navy ? Color.rgb(239, 194, 91) : Color.rgb(83, 82, 211));
         brand.addView(dot);
         TextView whisper = new TextView(this);
         whisper.setText("  Whisper Of Words");
         whisper.setTextSize(11.5f);
-        whisper.setTextColor(Color.rgb(122, 126, 140));
+        whisper.setTextColor(black ? Color.rgb(154, 159, 169) : (navy ? Color.rgb(178, 202, 214) : Color.rgb(122, 126, 140)));
         brand.addView(whisper);
         LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);

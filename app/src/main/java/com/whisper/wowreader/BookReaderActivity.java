@@ -88,6 +88,8 @@ public class BookReaderActivity extends Activity {
     private boolean controlsVisible = false;
     private FrameLayout readerLoadingOverlay;
     private ImageView readerStyleOverlay;
+    private ImageView pageSlideOverlay;
+    private Bitmap pageSlideBitmap;
     private Bitmap readerStyleBitmap;
     private boolean readerStyleReflowPending = false;
     private int readerStyleReflowToken = 0;
@@ -585,6 +587,15 @@ public class BookReaderActivity extends Activity {
         readerStyleOverlay.setClickable(false);
         readerStyleOverlay.setFocusable(false);
         content.addView(readerStyleOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        pageSlideOverlay = new ImageView(this);
+        pageSlideOverlay.setScaleType(ImageView.ScaleType.FIT_XY);
+        pageSlideOverlay.setVisibility(View.GONE);
+        pageSlideOverlay.setClickable(false);
+        pageSlideOverlay.setFocusable(false);
+        content.addView(pageSlideOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -1458,7 +1469,7 @@ public class BookReaderActivity extends Activity {
                     "st.nearestLogical=function(physical){if(!st.pageMap||!st.pageMap.length)return 0;var best=0,dist=1e9;for(var i=0;i<st.pageMap.length;i++){var d=Math.abs(st.pageMap[i]-physical);if(d<dist){dist=d;best=i;}}return best;};" +
                     "st.goToFragment=function(id){try{if(!id)return false;var el=document.getElementById(id);if(!el&&document.getElementsByName){var named=document.getElementsByName(id);if(named&&named.length)el=named[0];}if(!el)return false;" +
                     "var currentPhysical=st.physical(),r=el.getBoundingClientRect(),docX=(r.left-st.marginPx)+(currentPhysical*st.step),physical=Math.max(0,Math.floor((docX+2)/st.step));st.page=st.nearestLogical(physical);st.apply(false);st.report();return true;}catch(e){return false;}};" +
-                    "st.paperTurn=function(d,done){var mode=" + jsQuote(pageAnimation) + ";if(mode==='none'){st.apply(false);done();return;}st.apply(true);setTimeout(done,mode==='slide'?165:185);};" +
+                    "st.paperTurn=function(d,done){st.apply(false);done();};" +
                     "st.measure=function(r){st.measureEpoch=(st.measureEpoch||0)+1;var epoch=st.measureEpoch,ratio=st.clamp(r,0,1),attempt=0,lastSig='',stableHits=0;" +
                     "var run=function(){if(epoch!==st.measureEpoch)return;st.layout();st.page=0;st.pageMap=[0];flow.style.transition='none';flow.style.transform='translate3d('+st.marginPx+'px,0,0)';st.applyTypography();st.preparePagination();" +
                     "requestAnimationFrame(function(){requestAnimationFrame(function(){if(epoch!==st.measureEpoch)return;st.layout();var map=st.collectPageMap();if(!map.length){st.count=0;st.locked=false;WoW.onEmptyChapter();return;}" +
@@ -1581,6 +1592,28 @@ public class BookReaderActivity extends Activity {
         pendingChapterCurlDirection = 0;
         if (pageCurlView != null && !pageCurlView.isBusy()) pageCurlView.release();
         finishChapterFade();
+        prewarmAdjacentChapters();
+    }
+
+    private void prewarmAdjacentChapters() {
+        if (spine.isEmpty()) return;
+        final int here = currentSpine;
+        new Thread(() -> {
+            byte[] buffer = new byte[64 * 1024];
+            int[] targets = {here - 1, here + 1};
+            for (int idx : targets) {
+                if (idx < 0 || idx >= spine.size()) continue;
+                File f = spine.get(idx);
+                try (InputStream in = new FileInputStream(f)) {
+                    int left = 512 * 1024;
+                    while (left > 0) {
+                        int n = in.read(buffer, 0, Math.min(buffer.length, left));
+                        if (n <= 0) break;
+                        left -= n;
+                    }
+                } catch (Exception ignored) {}
+            }
+        }, "wow-chapter-prewarm").start();
     }
 
     private void forceChapterRepaginate(int generation) {
@@ -1956,12 +1989,8 @@ public class BookReaderActivity extends Activity {
             navigateChapter(direction, direction < 0);
             return;
         }
-        if ("paper".equals(pageAnimation) && pageCurlView != null) {
-            float touch = webView.getHeight() <= 0 ? 0.5f : Math.max(0.12f, Math.min(0.88f, tapY / (float) webView.getHeight()));
-            startNativeTapCurl(direction, targetPage - 1, touch);
-        } else {
-            performJsPageTurn(direction);
-        }
+        if ("slide".equals(pageAnimation)) startNativeSlidePageTurn(direction, targetPage - 1);
+        else performJsPageTurn(direction);
     }
 
     private void startNativeTapCurl(int direction, int targetZeroBased, float touchY) {
@@ -2013,12 +2042,74 @@ public class BookReaderActivity extends Activity {
             navigateChapter(direction, direction < 0);
             return;
         }
-        if ("paper".equals(pageAnimation) && pageCurlView != null)
-            startNativePageCurl(direction, targetPage - 1);
-        else
-            performJsPageTurn(direction);
+        if ("slide".equals(pageAnimation)) startNativeSlidePageTurn(direction, targetPage - 1);
+        else performJsPageTurn(direction);
     }
 
+
+    private void startNativeSlidePageTurn(int direction, int targetZeroBased) {
+        if (webView == null || pageSlideOverlay == null) { performJsPageTurn(direction); return; }
+        Bitmap current = captureWebViewBitmap();
+        if (current == null) { performJsPageTurn(direction); return; }
+        if (pageSlideBitmap != null && !pageSlideBitmap.isRecycled()) pageSlideBitmap.recycle();
+        pageSlideBitmap = current;
+        pageTurnLocked = true;
+        pageSlideOverlay.animate().cancel();
+        pageSlideOverlay.setImageBitmap(current);
+        pageSlideOverlay.setAlpha(1f);
+        pageSlideOverlay.setTranslationX(0f);
+        pageSlideOverlay.setVisibility(View.VISIBLE);
+        pageSlideOverlay.bringToFront();
+
+        String jump = "(function(){var st=window.__wowPageEngine;if(!st||st.mode!=='page')return 'unavailable';" +
+                "st.locked=true;st.page=st.clamp(" + targetZeroBased + ",0,(st.count||1)-1);st.apply(false);return 'ok';})()";
+        try {
+            webView.evaluateJavascript(jump, result -> {
+                if (result == null || result.contains("unavailable")) {
+                    finishNativeSlidePageTurn(false);
+                    performJsPageTurn(direction);
+                    return;
+                }
+                webView.postOnAnimation(() -> {
+                    float distance = Math.max(1f, webView.getWidth());
+                    webView.animate().cancel();
+                    webView.setTranslationX(direction > 0 ? distance * 0.055f : -distance * 0.055f);
+                    webView.setAlpha(0.92f);
+                    webView.animate().translationX(0f).alpha(1f).setDuration(205L)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator(1.45f)).start();
+                    pageSlideOverlay.animate().translationX(direction > 0 ? -distance : distance).alpha(0.18f)
+                            .setDuration(215L).setInterpolator(new android.view.animation.DecelerateInterpolator(1.28f))
+                            .withEndAction(() -> finishNativeSlidePageTurn(true)).start();
+                });
+            });
+        } catch (Exception e) {
+            finishNativeSlidePageTurn(false);
+            performJsPageTurn(direction);
+        }
+    }
+
+    private void finishNativeSlidePageTurn(boolean report) {
+        if (pageSlideOverlay != null) {
+            pageSlideOverlay.animate().cancel();
+            pageSlideOverlay.setVisibility(View.GONE);
+            pageSlideOverlay.setImageDrawable(null);
+            pageSlideOverlay.setAlpha(1f);
+            pageSlideOverlay.setTranslationX(0f);
+        }
+        if (pageSlideBitmap != null && !pageSlideBitmap.isRecycled()) pageSlideBitmap.recycle();
+        pageSlideBitmap = null;
+        if (webView != null) {
+            webView.animate().cancel();
+            webView.setTranslationX(0f);
+            webView.setAlpha(1f);
+            try {
+                webView.evaluateJavascript(report
+                        ? "(function(){var st=window.__wowPageEngine;if(!st)return;st.locked=false;st.report();WoW.onPageTurnComplete((st.page||0)+1,st.count||1,st.progress());})()"
+                        : "if(window.__wowPageEngine)window.__wowPageEngine.locked=false", null);
+            } catch (Exception ignored) {}
+        }
+        pageTurnLocked = false;
+    }
 
     private void startNativePageCurl(int direction, int targetZeroBased) {
         Bitmap current = captureWebViewBitmap();
@@ -2122,10 +2213,16 @@ public class BookReaderActivity extends Activity {
         if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled()) chapterTransitionBitmap.recycle();
         chapterTransitionBitmap = shot;
         chapterTransitionOverlay.setImageBitmap(shot);
+        chapterTransitionOverlay.animate().cancel();
         chapterTransitionOverlay.setAlpha(1f);
+        chapterTransitionOverlay.setTranslationX(0f);
         chapterTransitionOverlay.setVisibility(View.VISIBLE);
         chapterTransitionOverlay.bringToFront();
         pendingChapterFade = true;
+        chapterTransitionOverlay.animate()
+                .translationX((direction < 0 ? 1f : -1f) * dp(10))
+                .alpha(0.94f).setDuration(135L)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
     }
 
     private boolean finishPendingChapterCurl() {
@@ -2148,7 +2245,7 @@ public class BookReaderActivity extends Activity {
         if (!pendingChapterFade || chapterTransitionOverlay == null) return;
         pendingChapterFade = false;
         chapterTransitionOverlay.animate().cancel();
-        chapterTransitionOverlay.animate().alpha(0f).setDuration(190L).withEndAction(this::finishChapterFadeImmediate).start();
+        chapterTransitionOverlay.animate().alpha(0f).translationX(0f).setDuration(115L).setInterpolator(new android.view.animation.DecelerateInterpolator(1.55f)).withEndAction(this::finishChapterFadeImmediate).start();
     }
 
     private void finishChapterFadeImmediate() {
@@ -2158,6 +2255,7 @@ public class BookReaderActivity extends Activity {
             chapterTransitionOverlay.setVisibility(View.GONE);
             chapterTransitionOverlay.setImageDrawable(null);
             chapterTransitionOverlay.setAlpha(1f);
+            chapterTransitionOverlay.setTranslationX(0f);
         }
         if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled()) chapterTransitionBitmap.recycle();
         chapterTransitionBitmap = null;
