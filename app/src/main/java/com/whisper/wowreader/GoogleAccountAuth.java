@@ -15,8 +15,10 @@ import androidx.credentials.GetCredentialRequest;
 import androidx.credentials.GetCredentialResponse;
 import androidx.credentials.exceptions.ClearCredentialException;
 import androidx.credentials.exceptions.GetCredentialException;
+import androidx.credentials.exceptions.NoCredentialException;
 
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import com.google.firebase.auth.AuthCredential;
 import com.google.firebase.auth.FirebaseAuth;
@@ -56,7 +58,21 @@ final class GoogleAccountAuth {
     }
 
     void signIn(boolean chooseAccount, Callback callback) {
-        requestCredential(!chooseAccount, chooseAccount, callback);
+        if (chooseAccount) {
+            requestButtonCredential(callback);
+        } else {
+            requestCredential(true, true, callback);
+        }
+    }
+
+    private void requestButtonCredential(Callback callback) {
+        GetSignInWithGoogleOption option = new GetSignInWithGoogleOption.Builder(
+                activity.getString(R.string.default_web_client_id))
+                .build();
+        GetCredentialRequest request = new GetCredentialRequest.Builder()
+                .addCredentialOption(option)
+                .build();
+        launchCredentialRequest(request, false, callback);
     }
 
     private void requestCredential(boolean authorizedOnly, boolean allowRetry, Callback callback) {
@@ -68,7 +84,12 @@ final class GoogleAccountAuth {
         GetCredentialRequest request = new GetCredentialRequest.Builder()
                 .addCredentialOption(option)
                 .build();
+        launchCredentialRequest(request, authorizedOnly && allowRetry, callback);
+    }
 
+    private void launchCredentialRequest(GetCredentialRequest request,
+                                         boolean retryWithAllAccounts,
+                                         Callback callback) {
         credentialManager.getCredentialAsync(
                 new MutableContextWrapper(activity),
                 request,
@@ -80,7 +101,7 @@ final class GoogleAccountAuth {
                     }
 
                     @Override public void onError(GetCredentialException error) {
-                        if (authorizedOnly && allowRetry) {
+                        if (retryWithAllAccounts) {
                             requestCredential(false, false, callback);
                             return;
                         }
@@ -156,6 +177,9 @@ final class GoogleAccountAuth {
 
     private static String friendly(Throwable error, String fallback) {
         if (error == null) return fallback;
+        if (error instanceof NoCredentialException) {
+            return "No Google account was available. Add a Google account or update Google Play services, then try again.";
+        }
         String message = error.getLocalizedMessage();
         return message == null || message.trim().isEmpty() ? fallback : message.trim();
     }
