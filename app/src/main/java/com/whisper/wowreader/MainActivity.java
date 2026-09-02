@@ -945,23 +945,130 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(flags);
     }
 
+    // WOW_UX_REFRESH_V214
     private void showAppThemeDialog() {
-        String[] labels = {"White", "Black", "Navy Premium"};
-        String[] values = {"white", "black", "navy"};
+        final String[] labels = {"White", "Black", "Navy Premium"};
+        final String[] values = {"white", "black", "navy"};
+        final String[] icons = {"☀", "☾", "✦"};
         int selected = isBlackAppTheme() ? 1 : (isNavyAppTheme() ? 2 : 0);
-        new AlertDialog.Builder(this)
-                .setTitle("App theme")
-                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
-                    String chosen = values[which];
-                    if (!chosen.equals(appTheme)) {
-                        appTheme = chosen;
-                        prefs.edit().putString("app_theme", appTheme).apply();
-                        dialog.dismiss();
-                        recreate();
-                    } else dialog.dismiss();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        int panel = themeCardSurface();
+        int text = themePrimaryText();
+        int sub = themeSecondaryText();
+        int stroke = themeStroke();
+        int accent = Color.rgb(111, 78, 202);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(20), dp(18), dp(16));
+        card.setBackground(roundRect(panel, dp(28), dp(1), stroke));
+        card.setElevation(dp(14));
+
+        TextView title = new TextView(this);
+        title.setText("App Theme");
+        title.setTextSize(25);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(text);
+        title.setGravity(Gravity.CENTER);
+        card.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+
+        for (int i = 0; i < labels.length; i++) {
+            final int which = i;
+            boolean active = i == selected;
+            int rowAccent = i == 2 ? accent : themeAccent();
+            int fill;
+            if (active) {
+                fill = isBlackAppTheme() ? Color.rgb(43, 40, 58)
+                        : isNavyAppTheme() ? Color.rgb(18, 48, 75)
+                        : Color.rgb(248, 246, 255);
+            } else fill = themeControlSurface();
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(15), dp(6), dp(14), dp(6));
+            row.setMinimumHeight(dp(74));
+            row.setClickable(true);
+            row.setBackground(roundRect(fill, dp(20), dp(active ? 2 : 1), active ? rowAccent : stroke));
+            row.setElevation(active ? dp(4) : dp(1));
+
+            TextView radio = new TextView(this);
+            radio.setText(active ? "◉" : "○");
+            radio.setTextSize(active ? 29 : 31);
+            radio.setTextColor(active ? rowAccent : sub);
+            radio.setGravity(Gravity.CENTER);
+            row.addView(radio, new LinearLayout.LayoutParams(dp(54), dp(58)));
+
+            TextView label = new TextView(this);
+            label.setText(labels[i]);
+            label.setTextSize(18);
+            label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            label.setTextColor(text);
+            label.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(label, new LinearLayout.LayoutParams(0, dp(58), 1f));
+
+            TextView icon = new TextView(this);
+            icon.setText(icons[i]);
+            icon.setTextSize(i == 2 ? 25 : 24);
+            icon.setTextColor(active ? rowAccent : sub);
+            icon.setGravity(Gravity.CENTER);
+            row.addView(icon, new LinearLayout.LayoutParams(dp(52), dp(58)));
+
+            row.setOnTouchListener((v, e) -> {
+                if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
+                    v.animate().scaleX(0.985f).scaleY(0.985f).setDuration(60L).start();
+                else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP ||
+                        e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL)
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(115L).start();
+                return false;
+            });
+            row.setOnClickListener(v -> {
+                String chosen = values[which];
+                dialog.dismiss();
+                if (!chosen.equals(appTheme)) {
+                    appTheme = chosen;
+                    prefs.edit().putString("app_theme", appTheme).apply();
+                    recreate();
+                }
+            });
+
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(74));
+            rowLp.topMargin = dp(i == 0 ? 10 : 9);
+            card.addView(row, rowLp);
+        }
+
+        TextView cancel = new TextView(this);
+        cancel.setText("CANCEL");
+        cancel.setTextSize(14);
+        cancel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        cancel.setTextColor(accent);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+        cancelLp.topMargin = dp(8);
+        card.addView(cancel, cancelLp);
+
+        dialog.setContentView(card);
+        dialog.show();
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.48f);
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            window.setLayout(Math.min(sw - dp(28), dp(520)), ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+                window.setBackgroundBlurRadius(dp(24));
+            }
+        }
     }
 
     private GradientDrawable gradientRoundRect(int[] colors, int radius) {
@@ -1187,53 +1294,218 @@ public class MainActivity extends Activity {
     private interface AccountMenuAction { void onAction(int which); }
 
     private void showAccountActionDialog(String title,String message,String[] items,AccountMenuAction action){
-        LinearLayout body=new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(20),dp(4),dp(20),dp(4));
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
 
-        TextView description=new TextView(this);
-        description.setText(message);
-        description.setTextSize(15);
-        description.setTextColor(Color.rgb(78,82,92));
-        description.setLineSpacing(0f,1.18f);
-        body.addView(description,new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
+        int panel = themeCardSurface();
+        int text = themePrimaryText();
+        int sub = themeSecondaryText();
+        int stroke = themeStroke();
+        int surface = themeControlSurface();
+        int accent = themeAccent();
 
-        List<TextView> actionRows=new ArrayList<>();
-        for(String label:items){
-            TextView row=new TextView(this);
-            row.setText(label);
-            row.setTextSize(15.5f);
-            row.setTextColor(Color.rgb(75,72,190));
-            row.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setMinHeight(dp(52));
-            row.setPadding(dp(16),dp(8),dp(16),dp(8));
-            row.setBackground(roundRect(Color.rgb(248,249,252),dp(14),dp(1),Color.rgb(224,227,234)));
-            LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT);
-            params.topMargin=dp(9);
-            body.addView(row,params);
-            actionRows.add(row);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(16), dp(18), dp(18));
+        card.setBackground(roundRect(panel, dp(26), dp(1), stroke));
+        card.setElevation(dp(14));
+        scroll.addView(card, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView avatar = new TextView(this);
+        String initial = title == null || title.trim().isEmpty() ? "W" : title.trim().substring(0, 1).toUpperCase(Locale.ROOT);
+        avatar.setText(initial);
+        avatar.setTextSize(20);
+        avatar.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        avatar.setTextColor(Color.WHITE);
+        avatar.setGravity(Gravity.CENTER);
+        avatar.setBackground(roundRect(accent, dp(24), 0, Color.TRANSPARENT));
+        header.addView(avatar, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        LinearLayout headerCopy = new LinearLayout(this);
+        headerCopy.setOrientation(LinearLayout.VERTICAL);
+        headerCopy.setPadding(dp(12), 0, dp(8), 0);
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextSize(21);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        heading.setTextColor(text);
+        headerCopy.addView(heading);
+        TextView cloudState = new TextView(this);
+        cloudState.setText(prefs.getBoolean("google_sync_connected", false) ? "Google Drive backup connected" : "Account & backup");
+        cloudState.setTextSize(11.5f);
+        cloudState.setTextColor(sub);
+        headerCopy.addView(cloudState);
+        header.addView(headerCopy, new LinearLayout.LayoutParams(0, dp(52), 1f));
+
+        TextView close = new TextView(this);
+        close.setText("×");
+        close.setTextSize(24);
+        close.setTextColor(sub);
+        close.setGravity(Gravity.CENTER);
+        close.setBackground(roundRect(surface, dp(18), dp(1), stroke));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        card.addView(header);
+
+        String detailText = message == null ? "" : message;
+        String emailText = "";
+        int nl = detailText.indexOf('\n');
+        if (nl > 0 && detailText.substring(0, nl).contains("@")) {
+            emailText = detailText.substring(0, nl).trim();
+            detailText = detailText.substring(nl + 1).trim();
+        }
+        if (!emailText.isEmpty()) {
+            TextView email = new TextView(this);
+            email.setText(emailText);
+            email.setTextSize(13);
+            email.setTextColor(accent);
+            email.setPadding(dp(2), dp(9), dp(2), 0);
+            card.addView(email);
         }
 
-        ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(body,new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
-        AlertDialog dialog=new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(scroll)
-                .setNegativeButton("Close",null)
-                .create();
-        for(int i=0;i<actionRows.size();i++){
-            final int which=i;
-            actionRows.get(i).setOnClickListener(v->{
+        TextView description = new TextView(this);
+        description.setText(detailText);
+        description.setTextSize(13.5f);
+        description.setTextColor(sub);
+        description.setLineSpacing(dp(2), 1.12f);
+        description.setPadding(dp(2), dp(7), dp(2), dp(8));
+        card.addView(description, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        boolean accountSectionAdded = false;
+        boolean localSectionAdded = false;
+        for (int i = 0; i < items.length; i++) {
+            String label = items[i];
+            if (!accountSectionAdded && (label.startsWith("Switch Google") || label.equals("Sign out") ||
+                    label.startsWith("Disconnect Google"))) {
+                accountSectionAdded = true;
+                TextView section = new TextView(this);
+                section.setText("ACCOUNT");
+                section.setTextSize(10.5f);
+                section.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                section.setTextColor(sub);
+                section.setPadding(dp(2), dp(14), dp(2), dp(4));
+                card.addView(section);
+            }
+            if (!localSectionAdded && label.startsWith("Manual folder")) {
+                localSectionAdded = true;
+                TextView section = new TextView(this);
+                section.setText("LOCAL BACKUP");
+                section.setTextSize(10.5f);
+                section.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                section.setTextColor(sub);
+                section.setPadding(dp(2), dp(14), dp(2), dp(4));
+                card.addView(section);
+            }
+
+            final int which = i;
+            boolean primary = label.equals("Sync now") || label.equals("Sign in with Google") ||
+                    label.equals("Enable Google Drive sync");
+            boolean danger = label.startsWith("Disconnect Google") || label.equals("Sign out");
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(4), dp(12), dp(4));
+            row.setMinimumHeight(dp(58));
+            int rowFill = primary ? (isBlackAppTheme() ? Color.rgb(54, 60, 103)
+                    : isNavyAppTheme() ? Color.rgb(8, 79, 105) : Color.rgb(239, 241, 255)) : surface;
+            int rowStroke = primary ? accent : stroke;
+            if (danger) {
+                rowFill = isBlackAppTheme() ? Color.rgb(55, 35, 38) : Color.rgb(255, 246, 246);
+                rowStroke = Color.rgb(210, 92, 92);
+            }
+            row.setBackground(roundRect(rowFill, dp(18), dp(1), rowStroke));
+            row.setClickable(true);
+
+            String iconText = "•";
+            if (label.startsWith("Sync")) iconText = "↻";
+            else if (label.startsWith("Restore from")) iconText = "↺";
+            else if (label.startsWith("Auto sync")) iconText = "⟳";
+            else if (label.startsWith("Switch")) iconText = "⇄";
+            else if (label.startsWith("Disconnect") || label.equals("Sign out")) iconText = "×";
+            else if (label.startsWith("Manual folder backup")) iconText = "↑";
+            else if (label.startsWith("Manual folder restore")) iconText = "↓";
+            else if (label.startsWith("Sign in")) iconText = "G";
+            else if (label.startsWith("Enable Google Drive")) iconText = "☁";
+
+            TextView icon = new TextView(this);
+            icon.setText(iconText);
+            icon.setTextSize(19);
+            icon.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            icon.setTextColor(danger ? Color.rgb(198, 68, 68) : accent);
+            icon.setGravity(Gravity.CENTER);
+            row.addView(icon, new LinearLayout.LayoutParams(dp(40), dp(46)));
+
+            TextView labelView = new TextView(this);
+            labelView.setText(label.startsWith("Auto sync:") ? "Auto sync" : label);
+            labelView.setTextSize(15);
+            labelView.setTypeface(Typeface.DEFAULT, primary ? Typeface.BOLD : Typeface.NORMAL);
+            labelView.setTextColor(danger ? Color.rgb(198, 68, 68) : text);
+            labelView.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(labelView, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+            if (label.startsWith("Auto sync:")) {
+                boolean on = label.endsWith("On");
+                TextView state = new TextView(this);
+                state.setText(on ? "ON" : "OFF");
+                state.setTextSize(10.5f);
+                state.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                state.setTextColor(on ? Color.WHITE : sub);
+                state.setGravity(Gravity.CENTER);
+                state.setBackground(roundRect(on ? accent : themeTrackColor(), dp(15), dp(1), on ? accent : stroke));
+                row.addView(state, new LinearLayout.LayoutParams(dp(52), dp(30)));
+            } else {
+                TextView arrow = new TextView(this);
+                arrow.setText("›");
+                arrow.setTextSize(22);
+                arrow.setTextColor(sub);
+                arrow.setGravity(Gravity.CENTER);
+                row.addView(arrow, new LinearLayout.LayoutParams(dp(28), dp(44)));
+            }
+
+            row.setOnTouchListener((v, e) -> {
+                if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN)
+                    v.animate().scaleX(0.988f).scaleY(0.988f).setDuration(55L).start();
+                else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP ||
+                        e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL)
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(105L).start();
+                return false;
+            });
+            row.setOnClickListener(v -> {
                 dialog.dismiss();
                 action.onAction(which);
             });
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
+            lp.topMargin = dp(8);
+            card.addView(row, lp);
         }
+
+        dialog.setContentView(scroll);
         dialog.show();
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.44f);
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            int sh = getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(Math.min(sw - dp(24), dp(560)), Math.min((int)(sh * 0.88f), dp(720)));
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+                window.setBackgroundBlurRadius(dp(22));
+            }
+        }
     }
 
 
