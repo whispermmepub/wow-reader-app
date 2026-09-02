@@ -12,6 +12,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfRenderer;
@@ -38,6 +39,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -68,12 +71,13 @@ public class MainActivity extends Activity {
     private Typeface pyidaungsuTypeface;
     private TextView sortButton;
     private TextView authorButton;
-    private TextView accountButton;
+    private ProfileAvatarView accountButton;
     private TextView themeButton;
     private String appTheme = "white";
     private String sortMode = "added";
     private String authorFilter = "";
     private GoogleDriveSync googleDrive;
+    private GoogleAccountAuth googleAccount;
     private GoogleDriveSync.Profile googleProfile;
     private boolean googleSyncBusy = false;
     private long lastAutoSyncAttemptMs = 0L;
@@ -95,6 +99,7 @@ public class MainActivity extends Activity {
         appTheme = prefs.getString("app_theme", "white");
         if (!"white".equals(appTheme) && !"black".equals(appTheme) && !"navy".equals(appTheme)) appTheme = "white";
         applySystemBarTheme();
+        googleAccount = new GoogleAccountAuth(this);
         googleDrive = new GoogleDriveSync(this);
         restoreStoredGoogleProfile();
         gridMode = prefs.getBoolean("library_grid", true);
@@ -666,9 +671,7 @@ public class MainActivity extends Activity {
         brandCopy.addView(sub);
         brandRow.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        accountButton = iconButton("G");
-        accountButton.setTextSize(15);
-        accountButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        accountButton = new ProfileAvatarView(this);
         accountButton.setContentDescription("Google account & cloud library");
         accountButton.setOnClickListener(v -> showAccountMenu());
         brandRow.addView(accountButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -1108,8 +1111,16 @@ public class MainActivity extends Activity {
     private void confirmDelete(File file){new AlertDialog.Builder(this).setTitle("Remove from WoW Reader?").setMessage(stripExtension(file.getName())+"\n\nThis deletes WoW Reader's saved local copy. The original file you imported from Downloads or another folder is not changed.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->{if(file.delete()){prefs.edit().remove("percent_"+file.getName()).remove("library_title_"+file.getName()).remove("library_author_"+file.getName()).remove("library_owned_"+file.getName()).remove("added_at_"+file.getName()).remove("last_opened_"+file.getName()).putLong("sync_updated_ms",System.currentTimeMillis()).apply();refreshLibrary();maybeAutoGoogleSync();}}).show();}
 
     private void restoreStoredGoogleProfile(){
-        if(!prefs.getBoolean("google_sync_connected",false)) return;
+        GoogleDriveSync.Profile signedIn=googleAccount==null?null:googleAccount.currentProfile();
+        if(signedIn!=null){
+            googleProfile=signedIn;
+            rememberGoogleProfile(signedIn,false);
+            return;
+        }
+        if(!prefs.getBoolean("google_sync_connected",false)&&
+                prefs.getString("google_account_email","").isEmpty())return;
         googleProfile=new GoogleDriveSync.Profile();
+        googleProfile.uid=prefs.getString("google_account_uid","");
         googleProfile.name=prefs.getString("google_account_name","Google account");
         googleProfile.email=prefs.getString("google_account_email","");
         googleProfile.picture=prefs.getString("google_account_picture","");
@@ -1119,29 +1130,41 @@ public class MainActivity extends Activity {
         if(accountButton==null)return;
         boolean connected=prefs!=null&&prefs.getBoolean("google_sync_connected",false);
         String name=googleProfile==null?prefs.getString("google_account_name",""):googleProfile.name;
-        String initial="G";
-        if(connected&&name!=null&&!name.trim().isEmpty())initial=name.trim().substring(0,1).toUpperCase(Locale.ROOT);
-        accountButton.setText(initial);
-        accountButton.setTextColor(connected?Color.WHITE:Color.rgb(67,68,190));
-        accountButton.setBackground(connected
-                ?gradientRoundRect(new int[]{Color.rgb(91,76,220),Color.rgb(70,112,235)},dp(22))
-                :roundRect(Color.argb(188,255,255,255),dp(22),dp(1),Color.argb(80,210,214,222)));
-        accountButton.setContentDescription(connected?"Google account connected":"Connect Google account");
+        String picture=googleProfile==null?prefs.getString("google_account_picture",""):googleProfile.picture;
+        boolean signedIn=(googleAccount!=null&&googleAccount.isSignedIn())||
+                (googleProfile!=null&&googleProfile.email!=null&&!googleProfile.email.isEmpty());
+        accountButton.setProfile(name,picture,signedIn,connected);
+        accountButton.setContentDescription(connected?"Google account connected and cloud sync on":
+                signedIn?"Google profile signed in; finish cloud sync setup":"Connect Google account");
     }
 
     private void showAccountMenu(){
         boolean connected=prefs.getBoolean("google_sync_connected",false);
-        if(!connected){
+        boolean signedIn=googleAccount!=null&&googleAccount.isSignedIn();
+        if(!signedIn&&!connected){
             new AlertDialog.Builder(this)
                     .setTitle("Account & backup")
-                    .setMessage("Connect a Google account to privately sync books, notes, highlights and reading progress to your Drive.")
-                    .setItems(new String[]{"Connect Google account","Manual folder backup","Manual folder restore"},(d,w)->{
+                    .setMessage("Sign in with Google, then allow private Drive app-data access to sync books, notes, highlights and reading progress.")
+                    .setItems(new String[]{"Sign in with Google","Manual folder backup","Manual folder restore"},(d,w)->{
                         if(w==0)connectGoogleAccount(true); else openManualCloudPicker(w==1);
                     }).show();
             return;
         }
         String name=prefs.getString("google_account_name","Google account");
         String email=prefs.getString("google_account_email","");
+        if(!connected){
+            String[] items={"Enable Google Drive sync","Switch Google account","Sign out","Manual folder backup","Manual folder restore"};
+            new AlertDialog.Builder(this)
+                    .setTitle(name)
+                    .setMessage((email.isEmpty()?"":email+"\n")+"Profile sign-in is complete. Allow private Drive app-data access to turn on cloud sync.")
+                    .setItems(items,(d,w)->{
+                        if(w==0)authorizeGoogleDrive(googleProfile);
+                        else if(w==1)switchGoogleAccount();
+                        else if(w==2)disconnectGoogleAccount();
+                        else openManualCloudPicker(w==3);
+                    }).show();
+            return;
+        }
         boolean auto=prefs.getBoolean("google_sync_enabled",true);
         String[] items={"Sync now","Restore from Google Drive","Auto sync: "+(auto?"On":"Off"),"Switch Google account","Disconnect Google account","Manual folder backup","Manual folder restore"};
         new AlertDialog.Builder(this)
@@ -1151,51 +1174,77 @@ public class MainActivity extends Activity {
                     if(w==0)performGoogleBackup(true);
                     else if(w==1)confirmGoogleRestore();
                     else if(w==2){boolean enabled=!auto;prefs.edit().putBoolean("google_sync_enabled",enabled).apply();if(enabled)maybeAutoGoogleSync();else GoogleAutoSync.cancelPending();Toast.makeText(this,"Auto sync "+(enabled?"on":"off"),Toast.LENGTH_SHORT).show();}
-                    else if(w==3)connectGoogleAccount(true);
+                    else if(w==3)switchGoogleAccount();
                     else if(w==4)disconnectGoogleAccount();
                     else openManualCloudPicker(w==5);
                 }).show();
     }
 
     private void connectGoogleAccount(boolean chooseAccount){
+        if(googleSyncBusy)return;
+        googleSyncBusy=true;
+        if(googleAccount==null)googleAccount=new GoogleAccountAuth(this);
         if(googleDrive==null)googleDrive=new GoogleDriveSync(this);
-        googleDrive.authorize(chooseAccount,new GoogleDriveSync.AuthCallback(){
+        googleAccount.signIn(chooseAccount,new GoogleAccountAuth.Callback(){
             @Override public void onReady(GoogleDriveSync.Profile profile){
-                googleProfile=profile;
-                prefs.edit()
-                        .putBoolean("google_sync_connected",true)
-                        .putBoolean("google_sync_enabled",true)
-                        .putString("google_account_name",profile.name==null?"Google account":profile.name)
-                        .putString("google_account_email",profile.email==null?"":profile.email)
-                        .putString("google_account_picture",profile.picture==null?"":profile.picture)
-                        .apply();
-                updateAccountButton();
-                GoogleDriveSync.hasBackup(MainActivity.this,profile.accessToken,found->{
-                    File[] local=libraryDir.listFiles(file->file.isFile()&&isBook(file.getName()));
-                    boolean empty=local==null||local.length==0;
+                rememberGoogleProfile(profile,false);
+                authorizeGoogleDrive(profile);
+            }
+            @Override public void onError(String message){googleSyncBusy=false;Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
+        });
+    }
+
+    private void authorizeGoogleDrive(GoogleDriveSync.Profile identityProfile){
+        if(identityProfile==null&&googleAccount!=null)identityProfile=googleAccount.currentProfile();
+        if(identityProfile==null){googleSyncBusy=false;connectGoogleAccount(true);return;}
+        if(googleDrive==null)googleDrive=new GoogleDriveSync(this);
+        googleSyncBusy=true;
+        final GoogleDriveSync.Profile signedInProfile=identityProfile;
+        googleDrive.authorize(false,new GoogleDriveSync.AuthCallback(){
+            @Override public void onReady(GoogleDriveSync.Profile driveProfile){
+                signedInProfile.accessToken=driveProfile.accessToken;
+                rememberGoogleProfile(signedInProfile,true);
+                googleSyncBusy=false;
+                File[] local=libraryDir.listFiles(file->file.isFile()&&isBook(file.getName()));
+                boolean empty=local==null||local.length==0;
+                if(!empty&&prefs.getLong("sync_updated_ms",0L)==0L)
+                    prefs.edit().putLong("sync_updated_ms",System.currentTimeMillis()).apply();
+                GoogleDriveSync.hasBackup(MainActivity.this,driveProfile.accessToken,found->{
                     if(found&&empty){
                         new AlertDialog.Builder(MainActivity.this).setTitle("Restore your library?")
                                 .setMessage("A WoW Reader backup was found in this Google Drive. Restore your books, notes and highlights to this device?")
                                 .setNegativeButton("Not now",null).setPositiveButton("Restore",(d,w)->performGoogleRestore()).show();
                     }else{
                         new AlertDialog.Builder(MainActivity.this).setTitle("Google Drive connected")
-                                .setMessage("Auto sync is on. WoW Reader will back up changes automatically while keeping books available offline.")
+                                .setMessage("Auto sync is on. WoW Reader will back up changes automatically while keeping every imported book available offline.")
                                 .setPositiveButton("OK",null).show();
                         maybeAutoGoogleSync();
                     }
                 });
             }
-            @Override public void onError(String message){Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
+            @Override public void onError(String message){googleSyncBusy=false;Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
         });
     }
 
-    private void rememberGoogleProfile(GoogleDriveSync.Profile profile){
+    private void rememberGoogleProfile(GoogleDriveSync.Profile profile,boolean driveConnected){
+        if(profile==null)return;
         googleProfile=profile;
-        prefs.edit().putBoolean("google_sync_connected",true)
+        SharedPreferences.Editor edit=prefs.edit()
+                .putString("google_account_uid",profile.uid==null?"":profile.uid)
                 .putString("google_account_name",profile.name==null?"Google account":profile.name)
                 .putString("google_account_email",profile.email==null?"":profile.email)
-                .putString("google_account_picture",profile.picture==null?"":profile.picture).apply();
+                .putString("google_account_picture",profile.picture==null?"":profile.picture);
+        if(driveConnected)edit.putBoolean("google_sync_connected",true).putBoolean("google_sync_enabled",true);
+        edit.apply();
         updateAccountButton();
+    }
+
+    private GoogleDriveSync.Profile resolvedProfile(GoogleDriveSync.Profile driveProfile){
+        GoogleDriveSync.Profile profile=googleAccount==null?null:googleAccount.currentProfile();
+        if(profile==null)profile=googleProfile;
+        if(profile==null)profile=new GoogleDriveSync.Profile();
+        if(driveProfile!=null)profile.accessToken=driveProfile.accessToken;
+        return profile;
     }
 
     private File readerFontsDir(){File d=new File(getFilesDir(),"reader_fonts");if(!d.exists())d.mkdirs();return d;}
@@ -1207,9 +1256,10 @@ public class MainActivity extends Activity {
         googleSyncBusy=true;
         final long requestedChangeMs=prefs.getLong("sync_updated_ms",0L);
         googleDrive.authorize(false,new GoogleDriveSync.AuthCallback(){
-            @Override public void onReady(GoogleDriveSync.Profile profile){
-                rememberGoogleProfile(profile);
-                GoogleDriveSync.backup(MainActivity.this,profile.accessToken,libraryDir,readerFontsDir(),prefs,new GoogleDriveSync.SyncCallback(){
+            @Override public void onReady(GoogleDriveSync.Profile driveProfile){
+                GoogleDriveSync.Profile profile=resolvedProfile(driveProfile);
+                rememberGoogleProfile(profile,true);
+                GoogleDriveSync.backup(MainActivity.this,driveProfile.accessToken,libraryDir,readerFontsDir(),prefs,new GoogleDriveSync.SyncCallback(){
                     @Override public void onSuccess(String message){prefs.edit().putLong("google_last_synced_change_ms",requestedChangeMs).apply();googleSyncBusy=false;if(showToast)Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();maybeAutoGoogleSync();}
                     @Override public void onError(String message){googleSyncBusy=false;if(showToast)Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
                 });
@@ -1228,9 +1278,10 @@ public class MainActivity extends Activity {
         if(googleSyncBusy)return;
         googleSyncBusy=true;
         googleDrive.authorize(false,new GoogleDriveSync.AuthCallback(){
-            @Override public void onReady(GoogleDriveSync.Profile profile){
-                rememberGoogleProfile(profile);
-                GoogleDriveSync.restore(MainActivity.this,profile.accessToken,libraryDir,readerFontsDir(),prefs,new GoogleDriveSync.SyncCallback(){
+            @Override public void onReady(GoogleDriveSync.Profile driveProfile){
+                GoogleDriveSync.Profile profile=resolvedProfile(driveProfile);
+                rememberGoogleProfile(profile,true);
+                GoogleDriveSync.restore(MainActivity.this,driveProfile.accessToken,libraryDir,readerFontsDir(),prefs,new GoogleDriveSync.SyncCallback(){
                     @Override public void onSuccess(String message){googleSyncBusy=false;authorFilter="";refreshLibrary();Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
                     @Override public void onError(String message){googleSyncBusy=false;Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
                 });
@@ -1253,13 +1304,39 @@ public class MainActivity extends Activity {
     private void disconnectGoogleAccount(){
         GoogleAutoSync.cancelPending();
         GoogleDriveSync.Profile profile=googleProfile;
-        Runnable clear=()->runOnUiThread(()->{
+        Runnable signOut=()->{
+            if(googleAccount!=null)googleAccount.signOut(this::clearGoogleAccountState);
+            else clearGoogleAccountState();
+        };
+        if(googleDrive!=null)googleDrive.revoke(profile,signOut);else signOut.run();
+    }
+
+    private void switchGoogleAccount(){
+        GoogleAutoSync.cancelPending();
+        GoogleDriveSync.Profile profile=googleProfile;
+        Runnable signOut=()->{
+            if(googleAccount!=null)googleAccount.signOut(()->runOnUiThread(()->{
+                clearGoogleAccountState(false);
+                connectGoogleAccount(true);
+            }));
+            else runOnUiThread(()->{clearGoogleAccountState(false);connectGoogleAccount(true);});
+        };
+        if(googleDrive!=null)googleDrive.revoke(profile,signOut);else signOut.run();
+    }
+
+    private void clearGoogleAccountState(){clearGoogleAccountState(true);}
+
+    private void clearGoogleAccountState(boolean showToast){
+        runOnUiThread(()->{
             googleProfile=null;
-            prefs.edit().remove("google_sync_connected").remove("google_sync_enabled").remove("google_account_name").remove("google_account_email").remove("google_account_picture").remove("google_last_synced_change_ms").apply();
+            googleSyncBusy=false;
+            prefs.edit().remove("google_sync_connected").remove("google_sync_enabled")
+                    .remove("google_account_uid").remove("google_account_name")
+                    .remove("google_account_email").remove("google_account_picture")
+                    .remove("google_last_synced_change_ms").apply();
             updateAccountButton();
-            Toast.makeText(this,"Google account disconnected",Toast.LENGTH_SHORT).show();
+            if(showToast)Toast.makeText(this,"Google account disconnected",Toast.LENGTH_SHORT).show();
         });
-        if(googleDrive!=null)googleDrive.revoke(profile,clear);else clear.run();
     }
 
     private void openManualCloudPicker(boolean backup){
@@ -1289,6 +1366,131 @@ public class MainActivity extends Activity {
     private String stripExtension(String name){int dot=name.lastIndexOf('.');return dot>0?name.substring(0,dot):name;}
     private int colorForName(String name){int[] colors={Color.rgb(96,74,139),Color.rgb(55,102,136),Color.rgb(151,78,74),Color.rgb(76,111,82),Color.rgb(130,89,55)};return colors[Math.abs(name==null?0:name.hashCode())%colors.length];}
     private GradientDrawable roundRect(int color,float radius,int strokeWidth,int strokeColor){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(radius);if(strokeWidth>0)g.setStroke(strokeWidth,strokeColor);return g;}
+    private final class ProfileAvatarView extends View {
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint border=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path clipPath=new Path();
+        private Bitmap photo;
+        private String requestedUrl="";
+        private String initials="G";
+        private boolean signedIn;
+        private boolean connected;
+        private int requestGeneration;
+
+        ProfileAvatarView(android.content.Context context){
+            super(context);
+            setClickable(true);
+            setFocusable(true);
+            setElevation(dp(2));
+            border.setStyle(Paint.Style.STROKE);
+        }
+
+        void setProfile(String name,String pictureUrl,boolean hasProfile,boolean driveConnected){
+            signedIn=hasProfile;
+            connected=driveConnected;
+            initials=profileInitials(name);
+            String next=pictureUrl==null?"":pictureUrl.trim();
+            if(next.equals(requestedUrl)){
+                invalidate();
+                return;
+            }
+            requestedUrl=next;
+            photo=null;
+            int generation=++requestGeneration;
+            if(next.isEmpty()){
+                invalidate();
+                return;
+            }
+            File cached=new File(coverCacheDir,"google_profile_"+Integer.toHexString(next.hashCode())+".png");
+            Bitmap local=cached.isFile()?BitmapFactory.decodeFile(cached.getAbsolutePath()):null;
+            if(local!=null){
+                photo=local;
+                invalidate();
+                return;
+            }
+            new Thread(()->loadPhoto(next,cached,generation),"wow-profile-photo").start();
+        }
+
+        private void loadPhoto(String url,File cached,int generation){
+            HttpURLConnection connection=null;
+            try{
+                connection=(HttpURLConnection)new URL(url).openConnection();
+                connection.setConnectTimeout(12_000);
+                connection.setReadTimeout(18_000);
+                connection.setUseCaches(true);
+                connection.setInstanceFollowRedirects(true);
+                if(connection.getResponseCode()<200||connection.getResponseCode()>=300)return;
+                Bitmap loaded;
+                try(InputStream in=connection.getInputStream()){loaded=BitmapFactory.decodeStream(in);}
+                if(loaded==null)return;
+                try(OutputStream out=new FileOutputStream(cached)){loaded.compress(Bitmap.CompressFormat.PNG,95,out);}catch(Exception ignored){}
+                Bitmap ready=loaded;
+                runOnUiThread(()->{
+                    if(generation!=requestGeneration||!url.equals(requestedUrl))return;
+                    photo=ready;
+                    invalidate();
+                });
+            }catch(Exception ignored){
+            }finally{
+                if(connection!=null)connection.disconnect();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(getWidth(),getHeight())*.43f;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(signedIn?Color.rgb(79,91,213):Color.argb(235,247,248,255));
+            canvas.drawCircle(cx,cy,r,paint);
+            if(photo!=null&&!photo.isRecycled()){
+                int save=canvas.save();
+                clipPath.reset();
+                clipPath.addCircle(cx,cy,r,Path.Direction.CW);
+                canvas.clipPath(clipPath);
+                float diameter=r*2f;
+                float scale=Math.max(diameter/photo.getWidth(),diameter/photo.getHeight());
+                float drawWidth=photo.getWidth()*scale,drawHeight=photo.getHeight()*scale;
+                RectF destination=new RectF(cx-drawWidth/2f,cy-drawHeight/2f,cx+drawWidth/2f,cy+drawHeight/2f);
+                canvas.drawBitmap(photo,null,destination,paint);
+                canvas.restoreToCount(save);
+            }else{
+                paint.setColor(signedIn?Color.WHITE:Color.rgb(67,68,190));
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
+                paint.setTextSize(r*(initials.length()>1?.68f:.82f));
+                Paint.FontMetrics metrics=paint.getFontMetrics();
+                canvas.drawText(initials,cx,cy-(metrics.ascent+metrics.descent)/2f,paint);
+            }
+            border.setStrokeWidth(dp(1));
+            border.setColor(signedIn?Color.WHITE:Color.argb(90,92,103,160));
+            canvas.drawCircle(cx,cy,r,border);
+            if(signedIn){
+                float dotR=Math.max(dp(4),r*.18f);
+                float dotX=cx+r*.70f,dotY=cy+r*.70f;
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(Color.WHITE);
+                canvas.drawCircle(dotX,dotY,dotR+dp(2),paint);
+                paint.setColor(connected?Color.rgb(36,179,104):Color.rgb(245,158,11));
+                canvas.drawCircle(dotX,dotY,dotR,paint);
+            }
+        }
+
+        private String profileInitials(String name){
+            String value=name==null?"":name.trim();
+            if(value.isEmpty()||"Google account".equalsIgnoreCase(value))return "G";
+            String[] words=value.split("\\s+");
+            StringBuilder result=new StringBuilder();
+            appendFirstCodePoint(result,words[0]);
+            if(words.length>1)appendFirstCodePoint(result,words[words.length-1]);
+            return result.toString().toUpperCase(Locale.ROOT);
+        }
+
+        private void appendFirstCodePoint(StringBuilder target,String value){
+            if(value==null||value.isEmpty())return;
+            target.appendCodePoint(value.codePointAt(0));
+        }
+    }
+
     private final class ExploreLogoView extends View {
         private final String kind;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);

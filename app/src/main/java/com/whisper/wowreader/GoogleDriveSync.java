@@ -1,6 +1,5 @@
 package com.whisper.wowreader;
 
-import android.accounts.Account;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Intent;
@@ -43,18 +42,15 @@ final class GoogleDriveSync {
     static final int REQUEST_AUTHORIZE = 4104;
     private static final String BACKUP_NAME = "wow_reader_backup_v1.zip";
     private static final List<Scope> SCOPES = Arrays.asList(
-            new Scope(Scopes.DRIVE_APPFOLDER),
-            new Scope(Scopes.EMAIL),
-            new Scope(Scopes.PROFILE),
-            new Scope("openid")
+            new Scope(Scopes.DRIVE_APPFOLDER)
     );
 
     static final class Profile {
+        String uid = "";
         String name = "Google account";
         String email = "";
         String picture = "";
         String accessToken = "";
-        Account account;
     }
 
     interface AuthCallback {
@@ -83,7 +79,6 @@ final class GoogleDriveSync {
     void authorize(boolean chooseAccount, AuthCallback callback) {
         AuthorizationRequest.Builder builder = AuthorizationRequest.builder()
                 .setRequestedScopes(SCOPES);
-        if (chooseAccount) builder.setPrompt(AuthorizationRequest.Prompt.SELECT_ACCOUNT);
         AuthorizationRequest request = builder.build();
         authorizationClient.authorize(request)
                 .addOnSuccessListener(result -> handleAuthorizationResult(result, callback))
@@ -151,34 +146,11 @@ final class GoogleDriveSync {
         }
         Profile profile = new Profile();
         profile.accessToken = token;
-        try {
-            com.google.android.gms.auth.api.signin.GoogleSignInAccount account = result.toGoogleSignInAccount();
-            if (account != null) {
-                profile.name = account.getDisplayName() == null ? profile.name : account.getDisplayName();
-                profile.email = account.getEmail() == null ? "" : account.getEmail();
-                profile.account = account.getAccount();
-                if (account.getPhotoUrl() != null) profile.picture = account.getPhotoUrl().toString();
-            }
-        } catch (Exception ignored) {}
-
-        final Profile base = profile;
-        new Thread(() -> {
-            try {
-                JSONObject info = authorizedJson("https://openidconnect.googleapis.com/v1/userinfo", token);
-                String n = info.optString("name", "").trim();
-                String e = info.optString("email", "").trim();
-                String p = info.optString("picture", "").trim();
-                if (!n.isEmpty()) base.name = n;
-                if (!e.isEmpty()) base.email = e;
-                if (!p.isEmpty()) base.picture = p;
-            } catch (Exception ignored) {}
-            activity.runOnUiThread(() -> callback.onReady(base));
-        }, "wow-google-profile").start();
+        callback.onReady(profile);
     }
 
     void revoke(Profile profile, Runnable onDone) {
         RevokeAccessRequest.Builder builder = RevokeAccessRequest.builder().setScopes(SCOPES);
-        if (profile != null && profile.account != null) builder.setAccount(profile.account);
         authorizationClient.revokeAccess(builder.build())
                 .addOnCompleteListener(task -> {
                     if (onDone != null) onDone.run();
