@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
     private GoogleDriveSync.Profile googleProfile;
     private boolean googleSyncBusy = false;
     private long lastAutoSyncAttemptMs = 0L;
+    private Runnable googleSyncRetryRunnable;
     private volatile boolean metadataWarmupRunning = false;
     private final Collator myanmarCollator = Collator.getInstance(new Locale("my", "MM"));
     private final Collator englishCollator = Collator.getInstance(Locale.ENGLISH);
@@ -94,7 +95,8 @@ public class MainActivity extends Activity {
         appTheme = prefs.getString("app_theme", "white");
         if (!"white".equals(appTheme) && !"black".equals(appTheme) && !"navy".equals(appTheme)) appTheme = "white";
         applySystemBarTheme();
-        // Google account / Drive sync is intentionally deferred for a later release.
+        googleDrive = new GoogleDriveSync(this);
+        restoreStoredGoogleProfile();
         gridMode = prefs.getBoolean("library_grid", true);
         sortMode = prefs.getString("library_sort", "added");
         if (!"added".equals(sortMode) && !"opened".equals(sortMode) &&
@@ -115,6 +117,7 @@ public class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (libraryRecycler != null) refreshLibrary();
+        maybeAutoGoogleSync();
     }
 
     private void buildUi() {
@@ -663,6 +666,14 @@ public class MainActivity extends Activity {
         brandCopy.addView(sub);
         brandRow.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        accountButton = iconButton("G");
+        accountButton.setTextSize(15);
+        accountButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        accountButton.setContentDescription("Google account & cloud library");
+        accountButton.setOnClickListener(v -> showAccountMenu());
+        brandRow.addView(accountButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        updateAccountButton();
+
         themeButton = iconButton("navy".equals(appTheme) ? "✦" : "◐");
         themeButton.setTextSize(17);
         themeButton.setContentDescription("App theme");
@@ -1189,13 +1200,14 @@ public class MainActivity extends Activity {
     private File readerFontsDir(){File d=new File(getFilesDir(),"reader_fonts");if(!d.exists())d.mkdirs();return d;}
 
     private void performGoogleBackup(boolean showToast){
-        if(googleSyncBusy)return;
+        if(googleSyncBusy){scheduleGoogleSyncRetry(12000L);return;}
         googleSyncBusy=true;
+        final long requestedChangeMs=prefs.getLong("sync_updated_ms",0L);
         googleDrive.authorize(false,new GoogleDriveSync.AuthCallback(){
             @Override public void onReady(GoogleDriveSync.Profile profile){
                 rememberGoogleProfile(profile);
                 GoogleDriveSync.backup(MainActivity.this,profile.accessToken,libraryDir,readerFontsDir(),prefs,new GoogleDriveSync.SyncCallback(){
-                    @Override public void onSuccess(String message){googleSyncBusy=false;if(showToast)Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
+                    @Override public void onSuccess(String message){prefs.edit().putLong("google_last_synced_change_ms",requestedChangeMs).apply();googleSyncBusy=false;if(showToast)Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();maybeAutoGoogleSync();}
                     @Override public void onError(String message){googleSyncBusy=false;if(showToast)Toast.makeText(MainActivity.this,message,Toast.LENGTH_LONG).show();}
                 });
             }
@@ -1225,19 +1237,31 @@ public class MainActivity extends Activity {
     }
 
     private void maybeAutoGoogleSync(){
-        if(prefs==null||googleDrive==null||googleSyncBusy)return;
+        if(prefs==null||googleDrive==null)return;
         if(!prefs.getBoolean("google_sync_connected",false)||!prefs.getBoolean("google_sync_enabled",true))return;
-        long changed=prefs.getLong("sync_updated_ms",0L),backed=prefs.getLong("google_last_backup_ms",0L),now=System.currentTimeMillis();
-        if(changed<=backed||now-lastAutoSyncAttemptMs<45000L)return;
+        long changed=prefs.getLong("sync_updated_ms",0L);
+        long synced=prefs.getLong("google_last_synced_change_ms",prefs.getLong("google_last_backup_ms",0L));
+        if(changed<=synced)return;
+        if(googleSyncBusy){scheduleGoogleSyncRetry(12000L);return;}
+        long now=System.currentTimeMillis();
+        long remaining=12000L-(now-lastAutoSyncAttemptMs);
+        if(remaining>0L){scheduleGoogleSyncRetry(remaining);return;}
         lastAutoSyncAttemptMs=now;
         performGoogleBackup(false);
+    }
+
+    private void scheduleGoogleSyncRetry(long delayMs){
+        if(libraryRecycler==null)return;
+        if(googleSyncRetryRunnable!=null)libraryRecycler.removeCallbacks(googleSyncRetryRunnable);
+        googleSyncRetryRunnable=()->{googleSyncRetryRunnable=null;maybeAutoGoogleSync();};
+        libraryRecycler.postDelayed(googleSyncRetryRunnable,Math.max(1500L,delayMs));
     }
 
     private void disconnectGoogleAccount(){
         GoogleDriveSync.Profile profile=googleProfile;
         Runnable clear=()->runOnUiThread(()->{
             googleProfile=null;
-            prefs.edit().remove("google_sync_connected").remove("google_sync_enabled").remove("google_account_name").remove("google_account_email").remove("google_account_picture").apply();
+            prefs.edit().remove("google_sync_connected").remove("google_sync_enabled").remove("google_account_name").remove("google_account_email").remove("google_account_picture").remove("google_last_synced_change_ms").apply();
             updateAccountButton();
             Toast.makeText(this,"Google account disconnected",Toast.LENGTH_SHORT).show();
         });

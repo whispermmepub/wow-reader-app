@@ -3,7 +3,7 @@
 **WoW Reader** is an offline EPUB/PDF reader for the Whisper Of Words community.
 
 ## Current release
-- Version: **2.4.0**
+- Version: **2.14.0**
 - Android package: `com.whisper.wowreader`
 - Minimum Android: 6.0 (API 23)
 - Target SDK: 35
@@ -29,4 +29,4 @@
 - Website: https://saroatsin.com
 - Book reviews: https://whispermmepub.github.io/Review/
 
-Google Account / automatic Google Drive sync is currently disabled.
+Google Account cloud library is available: connect a Google account to privately back up books, notes, highlights, custom fonts and reading progress to the app's Google Drive app-data space, then restore them on another device.
