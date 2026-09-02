@@ -1142,43 +1142,100 @@ public class MainActivity extends Activity {
         boolean connected=prefs.getBoolean("google_sync_connected",false);
         boolean signedIn=googleAccount!=null&&googleAccount.isSignedIn();
         if(!signedIn&&!connected){
-            new AlertDialog.Builder(this)
-                    .setTitle("Account & backup")
-                    .setMessage("Sign in with Google, then allow private Drive app-data access to sync books, notes, highlights and reading progress.")
-                    .setItems(new String[]{"Sign in with Google","Manual folder backup","Manual folder restore"},(d,w)->{
-                        if(w==0)connectGoogleAccount(true); else openManualCloudPicker(w==1);
-                    }).show();
+            showAccountActionDialog(
+                    "Account & backup",
+                    "Sign in with Google, then allow private Drive app-data access to sync books, notes, highlights and reading progress.",
+                    new String[]{"Sign in with Google","Manual folder backup","Manual folder restore"},
+                    w->{if(w==0)connectGoogleAccount(true);else openManualCloudPicker(w==1);}
+            );
             return;
         }
         String name=prefs.getString("google_account_name","Google account");
         String email=prefs.getString("google_account_email","");
         if(!connected){
             String[] items={"Enable Google Drive sync","Switch Google account","Sign out","Manual folder backup","Manual folder restore"};
-            new AlertDialog.Builder(this)
-                    .setTitle(name)
-                    .setMessage((email.isEmpty()?"":email+"\n")+"Profile sign-in is complete. Allow private Drive app-data access to turn on cloud sync.")
-                    .setItems(items,(d,w)->{
+            showAccountActionDialog(
+                    name,
+                    (email.isEmpty()?"":email+"\n")+"Profile sign-in is complete. Allow private Drive app-data access to turn on cloud sync.",
+                    items,
+                    w->{
                         if(w==0)authorizeGoogleDrive(googleProfile);
                         else if(w==1)switchGoogleAccount();
                         else if(w==2)disconnectGoogleAccount();
                         else openManualCloudPicker(w==3);
-                    }).show();
+                    }
+            );
             return;
         }
         boolean auto=prefs.getBoolean("google_sync_enabled",true);
         String[] items={"Sync now","Restore from Google Drive","Auto sync: "+(auto?"On":"Off"),"Switch Google account","Disconnect Google account","Manual folder backup","Manual folder restore"};
-        new AlertDialog.Builder(this)
-                .setTitle(name)
-                .setMessage((email.isEmpty()?"":email+"\n")+"WoW Reader data is stored privately in this account's Google Drive app data.")
-                .setItems(items,(d,w)->{
+        showAccountActionDialog(
+                name,
+                (email.isEmpty()?"":email+"\n")+"WoW Reader data is stored privately in this account's Google Drive app data.",
+                items,
+                w->{
                     if(w==0)performGoogleBackup(true);
                     else if(w==1)confirmGoogleRestore();
                     else if(w==2){boolean enabled=!auto;prefs.edit().putBoolean("google_sync_enabled",enabled).apply();if(enabled)maybeAutoGoogleSync();else GoogleAutoSync.cancelPending();Toast.makeText(this,"Auto sync "+(enabled?"on":"off"),Toast.LENGTH_SHORT).show();}
                     else if(w==3)switchGoogleAccount();
                     else if(w==4)disconnectGoogleAccount();
                     else openManualCloudPicker(w==5);
-                }).show();
+                }
+        );
     }
+
+    private interface AccountMenuAction { void onAction(int which); }
+
+    private void showAccountActionDialog(String title,String message,String[] items,AccountMenuAction action){
+        LinearLayout body=new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(20),dp(4),dp(20),dp(4));
+
+        TextView description=new TextView(this);
+        description.setText(message);
+        description.setTextSize(15);
+        description.setTextColor(Color.rgb(78,82,92));
+        description.setLineSpacing(0f,1.18f);
+        body.addView(description,new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        List<TextView> actionRows=new ArrayList<>();
+        for(String label:items){
+            TextView row=new TextView(this);
+            row.setText(label);
+            row.setTextSize(15.5f);
+            row.setTextColor(Color.rgb(75,72,190));
+            row.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinHeight(dp(52));
+            row.setPadding(dp(16),dp(8),dp(16),dp(8));
+            row.setBackground(roundRect(Color.rgb(248,249,252),dp(14),dp(1),Color.rgb(224,227,234)));
+            LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.topMargin=dp(9);
+            body.addView(row,params);
+            actionRows.add(row);
+        }
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(body,new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(scroll)
+                .setNegativeButton("Close",null)
+                .create();
+        for(int i=0;i<actionRows.size();i++){
+            final int which=i;
+            actionRows.get(i).setOnClickListener(v->{
+                dialog.dismiss();
+                action.onAction(which);
+            });
+        }
+        dialog.show();
+    }
+
 
     private void connectGoogleAccount(boolean chooseAccount){
         if(googleSyncBusy)return;
