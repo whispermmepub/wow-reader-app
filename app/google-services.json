@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "1027420568326-m9f98kke24it1uvsfdlki6uanvrd2lna.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.whisper.wowreader",
+            "certificate_hash": "2117d31e01eb24eae3fe4a2688c8c712cd7671f1"
+          }
+        },
+        {
           "client_id": "1027420568326-pdbi6ecrdvv6nhnhj00fskq715e1ugtq.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
