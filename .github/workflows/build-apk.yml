@@ -1,4 +1,4 @@
-name: Build WoW Reader v2.13 APK
+name: Build WoW Reader v2.14 APK
 
 on:
   push:
@@ -46,8 +46,8 @@ jobs:
           test -s app/src/main/res/drawable/wow_logo.webp
           test -s app/src/main/assets/fonts/pyidaungsu.woff2
           test -s app/src/main/assets/fonts/pyidaungsu_native.ttf
-          grep -q "versionCode 25" app/build.gradle
-          grep -q "versionName '2.13.0'" app/build.gradle
+          grep -q "versionCode 26" app/build.gradle
+          grep -q "versionName '2.14.0'" app/build.gradle
           grep -q "androidx.recyclerview:recyclerview:1.3.2" app/build.gradle
           MAIN=app/src/main/java/com/whisper/wowreader/MainActivity.java
           READER=app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
@@ -61,7 +61,9 @@ jobs:
           grep -q 'library_owned_' "$MAIN"
           grep -q 'local copy saved' "$MAIN"
           grep -q 'original file you imported' "$MAIN"
-          ! grep -q 'accountButton = iconButton("G")' "$MAIN"
+          grep -q 'accountButton = iconButton("G")' "$MAIN"
+          grep -q 'googleDrive = new GoogleDriveSync(this)' "$MAIN"
+          grep -q 'google_last_synced_change_ms' "$MAIN"
           grep -q 'Opening book…' "$READER"
           grep -q 'applyReaderStyleSmooth' "$READER"
           grep -q 'wow-reader-block{line-height:' "$READER"
@@ -92,14 +94,14 @@ jobs:
           test -s "$APK"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='25'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.13.0'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='26'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.14.0'"
           unzip -l "$APK" | grep -q 'assets/fonts/pyidaungsu_native.ttf'
 
       - name: Collect APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.13.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.14.0-unsigned.apk
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' | sort -V | tail -n 1)
           test -n "$APKSIGNER_JAR"
           cp "$APKSIGNER_JAR" apksigner.jar
@@ -107,9 +109,9 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.13.0
+          name: WoW-Reader-v2.14.0
           path: |
-            WoW-Reader-v2.13.0-unsigned.apk
+            WoW-Reader-v2.14.0-unsigned.apk
             apksigner.jar
           if-no-files-found: error
           retention-days: 14
