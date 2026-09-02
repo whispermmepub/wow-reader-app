@@ -61,6 +61,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class BookReaderActivity extends Activity {
+    // WOW_UX_REFRESH_V214
     private File bookFile;
     private SharedPreferences prefs;
     private boolean isPdf;
@@ -102,6 +103,7 @@ public class BookReaderActivity extends Activity {
     private Bitmap chapterTransitionBitmap;
     private int pendingChapterCurlDirection = 0;
     private boolean pendingChapterFade = false;
+    private int pendingChapterDirection = 0;
     private GestureDetector readerTapDetector;
     private VelocityTracker pageVelocityTracker;
     private int pageTouchSlop = 12;
@@ -247,51 +249,82 @@ public class BookReaderActivity extends Activity {
         if (!isPdf) {
             readerLoadingOverlay = new FrameLayout(this);
             readerLoadingOverlay.setClickable(true);
-            int loadingBg = readerTheme == 2 ? Color.rgb(18, 18, 18) :
-                    (readerTheme == 1 ? Color.rgb(244, 236, 216) : Color.rgb(250, 250, 252));
-            readerLoadingOverlay.setBackgroundColor(loadingBg);
+            ReaderLoadingBackdropView loadingBackdrop = new ReaderLoadingBackdropView(this, readerTheme);
+            readerLoadingOverlay.addView(loadingBackdrop, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             LinearLayout loadingCard = new LinearLayout(this);
             loadingCard.setOrientation(LinearLayout.VERTICAL);
-            loadingCard.setGravity(Gravity.CENTER);
-            loadingCard.setPadding(dp(24), dp(20), dp(24), dp(20));
+            loadingCard.setGravity(Gravity.CENTER_HORIZONTAL);
+            loadingCard.setPadding(dp(22), dp(16), dp(22), dp(18));
+
+            FrameLayout logoHalo = new FrameLayout(this);
+            GradientDrawable halo = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    readerTheme == 2
+                            ? new int[]{Color.rgb(38, 105, 164), Color.rgb(75, 57, 177)}
+                            : readerTheme == 1
+                            ? new int[]{Color.rgb(222, 190, 127), Color.rgb(181, 137, 88)}
+                            : new int[]{Color.rgb(107, 168, 244), Color.rgb(132, 101, 226)});
+            halo.setShape(GradientDrawable.OVAL);
+            halo.setStroke(dp(2), readerTheme == 2 ? Color.rgb(99, 170, 244)
+                    : readerTheme == 1 ? Color.rgb(193, 148, 91) : Color.rgb(115, 133, 224));
+            logoHalo.setBackground(halo);
+            logoHalo.setPadding(dp(16), dp(16), dp(16), dp(16));
+            logoHalo.setElevation(dp(10));
 
             ImageView loadingLogo = new ImageView(this);
             loadingLogo.setImageResource(R.drawable.wow_logo);
             loadingLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-            loadingLogo.setAlpha(0.96f);
-            loadingCard.addView(loadingLogo, new LinearLayout.LayoutParams(dp(72), dp(72)));
+            loadingLogo.setAlpha(0.98f);
+            logoHalo.addView(loadingLogo, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            loadingCard.addView(logoHalo, new LinearLayout.LayoutParams(dp(138), dp(138)));
 
             TextView loadingTitle = new TextView(this);
             loadingTitle.setText("Opening book…");
-            loadingTitle.setTextSize(16);
+            loadingTitle.setTextSize(23);
             loadingTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-            loadingTitle.setTextColor(readerTheme == 2 ? Color.rgb(235, 237, 241) : Color.rgb(52, 54, 61));
+            loadingTitle.setTextColor(readerPanelText());
             loadingTitle.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams loadingTitleLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            loadingTitleLp.topMargin = dp(12);
+            loadingTitleLp.topMargin = dp(24);
             loadingCard.addView(loadingTitle, loadingTitleLp);
 
             TextView loadingSub = new TextView(this);
             loadingSub.setText("Preparing your reading page");
-            loadingSub.setTextSize(12.5f);
-            loadingSub.setTextColor(readerTheme == 2 ? Color.rgb(168, 172, 181) : Color.rgb(112, 116, 126));
+            loadingSub.setTextSize(13.5f);
+            loadingSub.setTextColor(readerPanelSubText());
             loadingSub.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams loadingSubLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            loadingSubLp.topMargin = dp(5);
+            loadingSubLp.topMargin = dp(8);
             loadingCard.addView(loadingSub, loadingSubLp);
+
+            TextView loadingBook = new TextView(this);
+            loadingBook.setText("▱");
+            loadingBook.setTextSize(29);
+            loadingBook.setTextColor(readerAccent());
+            loadingBook.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams loadingBookLp = new LinearLayout.LayoutParams(dp(48), dp(46));
+            loadingBookLp.topMargin = dp(18);
+            loadingCard.addView(loadingBook, loadingBookLp);
+
+            ReaderLoadingProgressView progress = new ReaderLoadingProgressView(this, readerTheme);
+            LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(260), dp(20));
+            progressLp.topMargin = dp(2);
+            loadingCard.addView(progress, progressLp);
 
             FrameLayout.LayoutParams loadingCardLp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+            loadingCardLp.topMargin = -dp(28);
             readerLoadingOverlay.addView(loadingCard, loadingCardLp);
             root.addView(readerLoadingOverlay, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            loadingCard.setScaleX(0.97f);
-            loadingCard.setScaleY(0.97f);
+            loadingCard.setScaleX(0.96f);
+            loadingCard.setScaleY(0.96f);
             loadingCard.setAlpha(0f);
-            loadingCard.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220L)
+            loadingCard.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260L)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator(1.35f)).start();
         }
 
@@ -428,19 +461,18 @@ public class BookReaderActivity extends Activity {
         selectionBar = new LinearLayout(this);
         selectionBar.setOrientation(LinearLayout.HORIZONTAL);
         selectionBar.setGravity(Gravity.CENTER);
-        selectionBar.setPadding(dp(5), dp(4), dp(5), dp(4));
-        int selectionBg = readerTheme == 2 ? Color.argb(242, 39, 40, 43) : Color.argb(244, 255, 255, 255);
-        int selectionStroke = readerTheme == 2 ? Color.argb(90, 255, 255, 255) : Color.argb(65, 70, 70, 70);
-        selectionBar.setBackground(glassPanel(selectionBg, dp(18), selectionStroke));
-        selectionBar.setElevation(dp(10));
+        selectionBar.setPadding(dp(7), dp(5), dp(7), dp(5));
+        selectionBar.setBackground(glassPanel(readerPanelBase(), dp(20), readerPanelStroke()));
+        selectionBar.setElevation(dp(14));
         selectionBar.addView(selectionActionButton("Highlight", SEL_HIGHLIGHT));
         selectionBar.addView(selectionActionButton("Note", SEL_NOTE));
         selectionBar.addView(selectionActionButton("Translate", SEL_TRANSLATE));
         selectionBar.addView(selectionActionButton("Copy", SEL_COPY));
         selectionBar.setVisibility(View.GONE);
         FrameLayout.LayoutParams selectionLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(48), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        selectionLp.bottomMargin = dp(68);
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(72), Gravity.TOP | Gravity.START);
+        selectionLp.leftMargin = dp(12);
+        selectionLp.topMargin = dp(100);
         root.addView(selectionBar, selectionLp);
 
         if (isPdf) {
@@ -892,15 +924,47 @@ public class BookReaderActivity extends Activity {
         }
     }
 
-    private TextView selectionActionButton(String label, int action) {
-        TextView button = new TextView(this);
-        button.setText(label);
-        button.setTextSize(12);
-        button.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        button.setTextColor(readerTheme == 2 ? Color.rgb(238, 240, 244) : Color.rgb(45, 48, 52));
+    private View selectionActionButton(String label, int action) {
+        LinearLayout button = new LinearLayout(this);
+        button.setOrientation(LinearLayout.VERTICAL);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(9), 0, dp(9), 0);
+        button.setPadding(dp(4), dp(4), dp(4), dp(3));
+        button.setClickable(true);
+        button.setContentDescription(label);
+
+        int iconColor = readerAccent();
+        String iconText = "✎";
+        if (action == SEL_HIGHLIGHT) { iconText = "✎"; iconColor = readerTheme == 1 ? Color.rgb(171, 116, 57) : Color.rgb(133, 79, 201); }
+        else if (action == SEL_NOTE) { iconText = "▤"; iconColor = Color.rgb(229, 170, 46); }
+        else if (action == SEL_TRANSLATE) { iconText = "A"; iconColor = Color.rgb(79, 126, 224); }
+        else if (action == SEL_COPY) { iconText = "▣"; iconColor = readerPanelSubText(); }
+
+        TextView icon = new TextView(this);
+        icon.setText(iconText);
+        icon.setTextSize(action == SEL_TRANSLATE ? 18 : 20);
+        icon.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        icon.setTextColor(iconColor);
+        icon.setGravity(Gravity.CENTER);
+        button.addView(icon, new LinearLayout.LayoutParams(dp(54), dp(30)));
+
+        TextView copy = new TextView(this);
+        copy.setText(label);
+        copy.setTextSize(11.5f);
+        copy.setTextColor(readerPanelText());
+        copy.setGravity(Gravity.CENTER);
+        copy.setSingleLine(true);
+        button.addView(copy, new LinearLayout.LayoutParams(dp(70), dp(24)));
+
+        button.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN)
+                v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(55L).start();
+            else if (e.getActionMasked() == MotionEvent.ACTION_UP ||
+                    e.getActionMasked() == MotionEvent.ACTION_CANCEL)
+                v.animate().scaleX(1f).scaleY(1f).setDuration(105L).start();
+            return false;
+        });
         button.setOnClickListener(v -> performSelectionAction(action));
+        button.setLayoutParams(new LinearLayout.LayoutParams(dp(74), dp(60)));
         return button;
     }
 
@@ -945,12 +1009,111 @@ public class BookReaderActivity extends Activity {
 
     private void showSelectionBar() {
         if (selectionBar == null || isPdf) return;
-        selectionBar.setVisibility(View.VISIBLE);
+        selectionBar.animate().cancel();
+        selectionBar.setVisibility(View.INVISIBLE);
         selectionBar.bringToFront();
+
+        if (webView == null) {
+            positionSelectionBarFallback();
+            return;
+        }
+        String js = "(function(){try{var s=window.getSelection&&window.getSelection();" +
+                "if(!s||s.rangeCount===0||s.isCollapsed)return null;var r=s.getRangeAt(0).getBoundingClientRect();" +
+                "var d=window.devicePixelRatio||1;return JSON.stringify({x:((r.left+r.right)/2)*d,t:r.top*d,b:r.bottom*d});" +
+                "}catch(e){return null;}})()";
+        try {
+            webView.evaluateJavascript(js, this::positionSelectionBarFromJs);
+        } catch (Exception ignored) {
+            positionSelectionBarFallback();
+        }
+    }
+
+    private void positionSelectionBarFromJs(String result) {
+        if (selectionBar == null) return;
+        try {
+            if (result == null || "null".equals(result)) {
+                positionSelectionBarFallback();
+                return;
+            }
+            Object decoded = new JSONTokener(result).nextValue();
+            String raw = decoded instanceof String ? (String) decoded : String.valueOf(decoded);
+            JSONObject o = new JSONObject(raw);
+            float centerX = (float) o.optDouble("x", webView == null ? 0 : webView.getWidth() / 2f);
+            float top = (float) o.optDouble("t", 0);
+            float bottom = (float) o.optDouble("b", top);
+            positionSelectionBar(centerX, top, bottom);
+        } catch (Exception ignored) {
+            positionSelectionBarFallback();
+        }
+    }
+
+    private void positionSelectionBar(float selectionCenterX, float selectionTop, float selectionBottom) {
+        if (selectionBar == null || root == null) return;
+        selectionBar.measure(
+                View.MeasureSpec.makeMeasureSpec(Math.max(1, root.getWidth() - dp(24)), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(dp(72), View.MeasureSpec.EXACTLY));
+        int barW = Math.max(dp(292), selectionBar.getMeasuredWidth());
+        int barH = dp(72);
+        int rootW = Math.max(1, root.getWidth());
+        int rootH = Math.max(1, root.getHeight());
+
+        int[] webLoc = new int[2];
+        int[] rootLoc = new int[2];
+        if (webView != null) webView.getLocationOnScreen(webLoc);
+        root.getLocationOnScreen(rootLoc);
+        int webOffsetX = webLoc[0] - rootLoc[0];
+        int webOffsetY = webLoc[1] - rootLoc[1];
+
+        int cx = webOffsetX + Math.round(selectionCenterX);
+        int top = webOffsetY + Math.round(selectionTop);
+        int bottom = webOffsetY + Math.round(selectionBottom);
+        int x = Math.max(dp(12), Math.min(rootW - barW - dp(12), cx - barW / 2));
+
+        int y = top - barH - dp(18);
+        int safeTop = dp(74);
+        int safeBottom = Math.max(safeTop, rootH - barH - dp(74));
+        if (y < safeTop) y = bottom + dp(18);
+        y = Math.max(safeTop, Math.min(safeBottom, y));
+
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) selectionBar.getLayoutParams();
+        lp.gravity = Gravity.TOP | Gravity.START;
+        lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        lp.height = barH;
+        lp.leftMargin = x;
+        lp.topMargin = y;
+        selectionBar.setLayoutParams(lp);
+        selectionBar.setAlpha(0f);
+        selectionBar.setTranslationY(dp(5));
+        selectionBar.setVisibility(View.VISIBLE);
+        selectionBar.animate().alpha(1f).translationY(0f).setDuration(135L)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f)).start();
+    }
+
+    private void positionSelectionBarFallback() {
+        if (selectionBar == null || root == null) return;
+        selectionBar.post(() -> {
+            int rootW = Math.max(1, root.getWidth());
+            int barW = Math.max(dp(292), selectionBar.getMeasuredWidth());
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) selectionBar.getLayoutParams();
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            lp.height = dp(72);
+            lp.leftMargin = Math.max(dp(12), (rootW - barW) / 2);
+            lp.topMargin = Math.max(dp(80), root.getHeight() - dp(168));
+            selectionBar.setLayoutParams(lp);
+            selectionBar.setAlpha(1f);
+            selectionBar.setTranslationY(0f);
+            selectionBar.setVisibility(View.VISIBLE);
+        });
     }
 
     private void hideSelectionBar() {
-        if (selectionBar != null) selectionBar.setVisibility(View.GONE);
+        if (selectionBar != null) {
+            selectionBar.animate().cancel();
+            selectionBar.setVisibility(View.GONE);
+            selectionBar.setAlpha(1f);
+            selectionBar.setTranslationY(0f);
+        }
     }
 
     private void performSelectionAction(int action) {
@@ -1104,14 +1267,22 @@ public class BookReaderActivity extends Activity {
         pageTurnLocked = "page".equals(readingMode);
         currentPageInChapter = 1;
         pageCountInChapter = 1;
+
+        boolean firstOpen = readerLoadingOverlay != null &&
+                readerLoadingOverlay.getVisibility() == View.VISIBLE &&
+                (chapterTransitionOverlay == null || chapterTransitionOverlay.getVisibility() != View.VISIBLE);
         webView.animate().cancel();
-        webView.setAlpha(0f);
+        webView.setTranslationX(0f);
+        webView.setAlpha(firstOpen ? 0f : 1f);
+
         try {
             webView.loadUrl(Uri.fromFile(spine.get(currentSpine)).toString());
             updateEpubProgress(currentProgressPermille);
             updateBookmarkIcon();
         } catch (Exception e) {
             chapterLoading = false;
+            pageTurnLocked = false;
+            finishChapterFadeImmediate();
             Toast.makeText(this, "Cannot open chapter", Toast.LENGTH_SHORT).show();
         }
     }
@@ -1143,34 +1314,70 @@ public class BookReaderActivity extends Activity {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
 
-        int panelBase = readerTheme == 2 ? Color.rgb(29, 30, 33)
-                : readerTheme == 1 ? Color.rgb(249, 243, 225) : Color.WHITE;
-        int text = readerTheme == 2 ? Color.rgb(238, 240, 244) : Color.rgb(32, 33, 36);
-        int sub = readerTheme == 2 ? Color.rgb(190, 194, 201) : Color.rgb(95, 99, 104);
-        int accent = readerTheme == 2 ? Color.rgb(138, 180, 248) : Color.rgb(103, 80, 164);
+        int panel = readerPanelBase();
+        int text = readerPanelText();
+        int sub = readerPanelSubText();
+        int accent = readerAccent();
+        int stroke = readerPanelStroke();
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(16), dp(14), dp(10));
-        card.setBackground(glassPanel(Color.argb(readerTheme == 2 ? 236 : 232,
-                Color.red(panelBase), Color.green(panelBase), Color.blue(panelBase)), dp(22),
-                Color.argb(readerTheme == 2 ? 70 : 95, 255, 255, 255)));
+        card.setPadding(dp(16), dp(14), dp(16), dp(12));
+        card.setBackground(glassPanel(panel, dp(26), stroke));
+        card.setElevation(dp(14));
 
-        TextView header = new TextView(this);
-        header.setText("Table of contents");
-        header.setTextSize(24);
-        header.setTextColor(text);
-        header.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(8), dp(2), dp(8), dp(10));
-        card.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView headerIcon = new TextView(this);
+        headerIcon.setText("☷");
+        headerIcon.setTextSize(22);
+        headerIcon.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        headerIcon.setTextColor(accent);
+        headerIcon.setGravity(Gravity.CENTER);
+        headerIcon.setBackground(glassPanel(readerSelectedSurface(), dp(22), Color.TRANSPARENT));
+        header.addView(headerIcon, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+        TextView title = new TextView(this);
+        title.setText("Table of contents");
+        title.setTextSize(23);
+        title.setTextColor(text);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(50), 1f));
+
+        View headerSpacer = new View(this);
+        header.addView(headerSpacer, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        card.addView(header);
+
+        LinearLayout divider = new LinearLayout(this);
+        divider.setOrientation(LinearLayout.HORIZONTAL);
+        divider.setGravity(Gravity.CENTER_VERTICAL);
+        View leftLine = new View(this);
+        leftLine.setBackgroundColor(stroke);
+        divider.addView(leftLine, new LinearLayout.LayoutParams(0, dp(1), 1f));
+        TextView sparkle = new TextView(this);
+        sparkle.setText("✦");
+        sparkle.setTextSize(13);
+        sparkle.setTextColor(accent);
+        sparkle.setGravity(Gravity.CENTER);
+        divider.addView(sparkle, new LinearLayout.LayoutParams(dp(38), dp(24)));
+        View rightLine = new View(this);
+        rightLine.setBackgroundColor(stroke);
+        divider.addView(rightLine, new LinearLayout.LayoutParams(0, dp(1), 1f));
+        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(28));
+        dividerLp.topMargin = dp(2);
+        dividerLp.bottomMargin = dp(4);
+        card.addView(divider, dividerLp);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(0, 0, 0, dp(4));
         scroll.addView(list, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -1178,11 +1385,11 @@ public class BookReaderActivity extends Activity {
         if (entryCount == 0) {
             TextView none = new TextView(this);
             none.setText("This EPUB does not contain a chapter table of contents.");
-            none.setTextSize(16);
+            none.setTextSize(15);
             none.setTextColor(sub);
-            none.setPadding(dp(12), dp(18), dp(12), dp(18));
-            list.addView(none, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            none.setGravity(Gravity.CENTER);
+            none.setPadding(dp(16), dp(28), dp(16), dp(28));
+            list.addView(none);
         }
 
         for (int i = 0; i < entryCount; i++) {
@@ -1194,30 +1401,35 @@ public class BookReaderActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(5), dp(6), dp(8), dp(6));
-            row.setMinimumHeight(dp(58));
-            if (selected) {
-                row.setBackground(glassPanel(Color.argb(readerTheme == 2 ? 72 : 48,
-                        Color.red(accent), Color.green(accent), Color.blue(accent)), dp(14), Color.TRANSPARENT));
-            }
+            row.setPadding(dp(10), dp(5), dp(10), dp(5));
+            row.setMinimumHeight(dp(62));
+            if (selected) row.setBackground(glassPanel(readerSelectedSurface(), dp(17), accent));
 
             TextView marker = new TextView(this);
             marker.setText(selected ? "●" : "○");
-            marker.setTextSize(selected ? 19 : 22);
+            marker.setTextSize(selected ? 17 : 21);
             marker.setTextColor(selected ? accent : sub);
             marker.setGravity(Gravity.CENTER);
-            row.addView(marker, new LinearLayout.LayoutParams(dp(42), dp(46)));
+            row.addView(marker, new LinearLayout.LayoutParams(dp(42), dp(50)));
 
             TextView label = new TextView(this);
             label.setText(tocTitleAt(entry));
-            label.setTextSize(17);
+            label.setTextSize(16.5f);
             label.setTextColor(text);
             label.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            label.setLineSpacing(0f, 1.12f);
-            label.setPadding(dp(7), dp(4), dp(5), dp(4));
+            label.setLineSpacing(dp(1), 1.10f);
+            label.setPadding(dp(6), dp(5), dp(4), dp(5));
             row.addView(label, new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+            row.setOnTouchListener((v, e) -> {
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN)
+                    v.animate().scaleX(0.992f).scaleY(0.992f).setDuration(50L).start();
+                else if (e.getActionMasked() == MotionEvent.ACTION_UP ||
+                        e.getActionMasked() == MotionEvent.ACTION_CANCEL)
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(95L).start();
+                return false;
+            });
             row.setOnClickListener(v -> {
                 if (chapterLoading) return;
                 if (spineIndex == currentSpine) {
@@ -1237,8 +1449,22 @@ public class BookReaderActivity extends Activity {
                 }
                 dialog.dismiss();
             });
-            list.addView(row, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowLp.topMargin = dp(3);
+            list.addView(row, rowLp);
+
+            if (i < entryCount - 1 && !selected) {
+                View line = new View(this);
+                line.setBackgroundColor(Color.argb(readerTheme == 2 ? 45 : 35,
+                        Color.red(sub), Color.green(sub), Color.blue(sub)));
+                LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+                lineLp.leftMargin = dp(52);
+                lineLp.rightMargin = dp(8);
+                list.addView(line, lineLp);
+            }
         }
 
         card.addView(scroll, new LinearLayout.LayoutParams(
@@ -1246,30 +1472,31 @@ public class BookReaderActivity extends Activity {
 
         TextView close = new TextView(this);
         close.setText("CLOSE");
-        close.setTextSize(14);
+        close.setTextSize(13.5f);
         close.setTextColor(accent);
         close.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         close.setGravity(Gravity.CENTER);
-        close.setPadding(dp(10), dp(8), dp(10), dp(6));
+        close.setBackground(glassPanel(readerSoftSurface(), dp(18), stroke));
         close.setOnClickListener(v -> dialog.dismiss());
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(92), dp(52));
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(104), dp(44));
         closeLp.gravity = Gravity.END;
+        closeLp.topMargin = dp(8);
         card.addView(close, closeLp);
 
         dialog.setContentView(card);
         dialog.show();
-
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            window.setDimAmount(0.30f);
+            window.setDimAmount(0.46f);
             int sw = getResources().getDisplayMetrics().widthPixels;
             int sh = getResources().getDisplayMetrics().heightPixels;
-            window.setLayout(Math.min(sw - dp(26), dp(560)), Math.min(sh - dp(50), (int) (sh * 0.88f)));
+            window.setLayout(Math.min(sw - dp(28), dp(560)),
+                    Math.min(sh - dp(54), (int) (sh * 0.88f)));
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
-                window.setBackgroundBlurRadius(dp(28));
+                window.setBackgroundBlurRadius(dp(24));
             }
         }
     }
@@ -1586,8 +1813,15 @@ public class BookReaderActivity extends Activity {
     private void revealStableChapter() {
         if (webView != null) {
             webView.animate().cancel();
-            webView.animate().alpha(1f).setDuration(135L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            webView.setAlpha(1f);
+            if (pendingChapterFade && "slide".equals(pageAnimation) && "page".equals(readingMode)) {
+                float offset = (pendingChapterDirection < 0 ? -1f : 1f) * dp(18);
+                webView.setTranslationX(offset);
+                webView.animate().translationX(0f).setDuration(175L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.35f)).start();
+            } else {
+                webView.setTranslationX(0f);
+            }
         }
         hideInitialReaderLoading();
         pageTurnLocked = false;
@@ -2201,19 +2435,14 @@ public class BookReaderActivity extends Activity {
     }
 
     private void prepareChapterTransition(int direction) {
-        if (webView == null || webView.getUrl() == null) return;
+        if (webView == null || webView.getUrl() == null || chapterTransitionOverlay == null) return;
         Bitmap shot = captureWebViewBitmap();
         if (shot == null) return;
 
-        if ("page".equals(readingMode) && "paper".equals(pageAnimation) && pageCurlView != null) {
-            finishChapterFadeImmediate();
-            pendingChapterCurlDirection = direction < 0 ? -1 : 1;
-            pageCurlView.hold(shot);
-            return;
-        }
-
+        pendingChapterDirection = direction < 0 ? -1 : 1;
         pendingChapterCurlDirection = 0;
-        if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled()) chapterTransitionBitmap.recycle();
+        if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled())
+            chapterTransitionBitmap.recycle();
         chapterTransitionBitmap = shot;
         chapterTransitionOverlay.setImageBitmap(shot);
         chapterTransitionOverlay.animate().cancel();
@@ -2222,10 +2451,6 @@ public class BookReaderActivity extends Activity {
         chapterTransitionOverlay.setVisibility(View.VISIBLE);
         chapterTransitionOverlay.bringToFront();
         pendingChapterFade = true;
-        chapterTransitionOverlay.animate()
-                .translationX((direction < 0 ? 1f : -1f) * dp(10))
-                .alpha(0.94f).setDuration(135L)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
     }
 
     private boolean finishPendingChapterCurl() {
@@ -2248,11 +2473,21 @@ public class BookReaderActivity extends Activity {
         if (!pendingChapterFade || chapterTransitionOverlay == null) return;
         pendingChapterFade = false;
         chapterTransitionOverlay.animate().cancel();
-        chapterTransitionOverlay.animate().alpha(0f).translationX(0f).setDuration(115L).setInterpolator(new android.view.animation.DecelerateInterpolator(1.55f)).withEndAction(this::finishChapterFadeImmediate).start();
+        long duration = "slide".equals(pageAnimation) && "page".equals(readingMode) ? 180L : 92L;
+        float distance = "slide".equals(pageAnimation) && "page".equals(readingMode)
+                ? (pendingChapterDirection < 0 ? 1f : -1f) * dp(36) : 0f;
+        chapterTransitionOverlay.animate()
+                .alpha(0f)
+                .translationX(distance)
+                .setDuration(duration)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.45f))
+                .withEndAction(this::finishChapterFadeImmediate)
+                .start();
     }
 
     private void finishChapterFadeImmediate() {
         pendingChapterFade = false;
+        pendingChapterDirection = 0;
         if (chapterTransitionOverlay != null) {
             chapterTransitionOverlay.animate().cancel();
             chapterTransitionOverlay.setVisibility(View.GONE);
@@ -2260,8 +2495,13 @@ public class BookReaderActivity extends Activity {
             chapterTransitionOverlay.setAlpha(1f);
             chapterTransitionOverlay.setTranslationX(0f);
         }
-        if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled()) chapterTransitionBitmap.recycle();
+        if (chapterTransitionBitmap != null && !chapterTransitionBitmap.isRecycled())
+            chapterTransitionBitmap.recycle();
         chapterTransitionBitmap = null;
+        if (webView != null) {
+            webView.setAlpha(1f);
+            webView.setTranslationX(0f);
+        }
     }
 
     private String chapterDisplayTitle(int index) {
@@ -2276,6 +2516,88 @@ public class BookReaderActivity extends Activity {
         if (low.isEmpty() || low.equals("unknown") || low.equals("untitled") || low.equals("undefined") ||
                 low.equals("null") || low.equals("none") || low.equals("n/a") || low.equals("no title")) return true;
         return low.matches("^(chapter|section|part|page|text|content|item|file)\\s*$");
+    }
+
+
+    private int readerPanelBase() {
+        if (readerTheme == 2) return Color.rgb(28, 29, 33);
+        if (readerTheme == 1) return Color.rgb(249, 243, 226);
+        return Color.rgb(253, 253, 255);
+    }
+
+    private int readerPanelText() {
+        return readerTheme == 2 ? Color.rgb(240, 242, 247)
+                : readerTheme == 1 ? Color.rgb(66, 54, 40) : Color.rgb(31, 33, 39);
+    }
+
+    private int readerPanelSubText() {
+        return readerTheme == 2 ? Color.rgb(181, 186, 197)
+                : readerTheme == 1 ? Color.rgb(126, 105, 78) : Color.rgb(101, 106, 118);
+    }
+
+    private int readerAccent() {
+        return readerTheme == 2 ? Color.rgb(142, 163, 255)
+                : readerTheme == 1 ? Color.rgb(164, 111, 67) : Color.rgb(103, 80, 190);
+    }
+
+    private int readerPanelStroke() {
+        return readerTheme == 2 ? Color.rgb(68, 72, 82)
+                : readerTheme == 1 ? Color.rgb(222, 205, 172) : Color.rgb(225, 225, 234);
+    }
+
+    private int readerSoftSurface() {
+        return readerTheme == 2 ? Color.rgb(40, 42, 48)
+                : readerTheme == 1 ? Color.rgb(245, 236, 216) : Color.rgb(250, 250, 253);
+    }
+
+    private int readerSelectedSurface() {
+        return readerTheme == 2 ? Color.rgb(60, 57, 86)
+                : readerTheme == 1 ? Color.rgb(243, 229, 206) : Color.rgb(244, 240, 255);
+    }
+
+    private void refreshSelectionBarTheme() {
+        if (selectionBar == null) return;
+        selectionBar.setBackground(glassPanel(readerPanelBase(), dp(20), readerPanelStroke()));
+        selectionBar.removeAllViews();
+        selectionBar.addView(selectionActionButton("Highlight", SEL_HIGHLIGHT));
+        selectionBar.addView(selectionActionButton("Note", SEL_NOTE));
+        selectionBar.addView(selectionActionButton("Translate", SEL_TRANSLATE));
+        selectionBar.addView(selectionActionButton("Copy", SEL_COPY));
+    }
+
+    private String decoratedSheetChipLabel(String label) {
+        if ("Light".equals(label)) return "☀  Light";
+        if ("Sepia".equals(label)) return "☕  Sepia";
+        if ("Dark".equals(label)) return "☾  Dark";
+        if ("Off".equals(label)) return "⏻  Off";
+        if ("Auto".equals(label)) return "Ⓐ  Auto";
+        if ("On".equals(label)) return "◉  On";
+        if ("Justify".equals(label)) return "≡  Justify";
+        if ("Left".equals(label)) return "≡  Left";
+        if ("Right".equals(label)) return "≡  Right";
+        if ("Narrow".equals(label)) return "▯  Narrow";
+        if ("Normal".equals(label)) return "▣  Normal";
+        if ("Wide".equals(label)) return "▯  Wide";
+        if ("Pages".equals(label)) return "▤  Pages";
+        if ("Scroll".equals(label)) return "↕  Scroll";
+        if ("None".equals(label)) return "○  None";
+        if ("Slide".equals(label)) return "⇆  Slide";
+        if (label != null && label.startsWith("Font · ")) return "Aa  " + label;
+        if ("More reader settings".equals(label)) return "☰  More reader settings   ›";
+        return label;
+    }
+
+    private String decoratedSheetSection(String label) {
+        if ("Theme".equals(label)) return "◉   Theme";
+        if ("Night Light".equals(label)) return "☾   Night Light";
+        if ("Text".equals(label)) return "Tᵀ   Text";
+        if ("Line height".equals(label)) return "↕   Line height";
+        if ("Alignment".equals(label)) return "≡   Alignment";
+        if ("Margins".equals(label)) return "▣   Margins";
+        if ("Reading".equals(label)) return "▤   Reading";
+        if ("Page animation".equals(label)) return "⇆   Page animation";
+        if ("Reading brightness".equals(label)) return "☀   Reading brightness";
+        return label;
     }
 
     private GradientDrawable glassPanel(int fill, int radius, int stroke) {
@@ -2313,20 +2635,37 @@ public class BookReaderActivity extends Activity {
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(14), dp(18), dp(20));
-        card.setBackground(glassPanel(Color.argb(248, Color.red(panel), Color.green(panel), Color.blue(panel)),
-                dp(26), Color.argb(readerTheme == 2 ? 55 : 72, 150, 155, 168)));
+        card.setPadding(dp(18), dp(12), dp(18), dp(20));
+        card.setBackground(glassPanel(Color.argb(253, Color.red(panel), Color.green(panel), Color.blue(panel)),
+                dp(28), readerPanelStroke()));
+        card.setElevation(dp(14));
         scroll.addView(card, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        View dragHandle = new View(this);
+        dragHandle.setBackground(glassPanel(readerPanelStroke(), dp(3), Color.TRANSPARENT));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(38), dp(5));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        handleLp.bottomMargin = dp(7);
+        card.addView(dragHandle, handleLp);
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView headerIcon = new TextView(this);
+        headerIcon.setText("☷");
+        headerIcon.setTextSize(21);
+        headerIcon.setTextColor(readerAccent());
+        headerIcon.setGravity(Gravity.CENTER);
+        headerIcon.setBackground(glassPanel(readerSelectedSurface(), dp(20), Color.TRANSPARENT));
+        header.addView(headerIcon, new LinearLayout.LayoutParams(dp(42), dp(42)));
         TextView title = new TextView(this);
         title.setText("Display options");
         title.setTextSize(22);
         title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         title.setTextColor(text);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams titleHeaderLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        titleHeaderLp.leftMargin = dp(10);
+        header.addView(title, titleHeaderLp);
         TextView close = sheetChip("×", false);
         close.setTextSize(24);
         close.setOnClickListener(v -> dialog.dismiss());
@@ -2343,7 +2682,9 @@ public class BookReaderActivity extends Activity {
                 saveReaderPreferences();
                 applyReaderStyle(true);
                 updateChromeTheme();
-                selectSheetChip(themeChips, value);
+                refreshSelectionBarTheme();
+                dialog.dismiss();
+                showReaderSettings();
             });
             themeRow.addView(themeChips[i], sheetChipLp(i > 0));
         }
@@ -2482,11 +2823,11 @@ public class BookReaderActivity extends Activity {
         if (w != null) {
             w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            w.setDimAmount(0.20f);
+            w.setDimAmount(0.42f);
             w.setGravity(Gravity.BOTTOM);
             int sw = getResources().getDisplayMetrics().widthPixels;
             int sh = getResources().getDisplayMetrics().heightPixels;
-            w.setLayout(Math.min(sw, dp(620)), Math.min((int) (sh * 0.84f), dp(760)));
+            w.setLayout(Math.min(sw - dp(16), dp(620)), Math.min((int) (sh * 0.86f), dp(780)));
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
                 w.setBackgroundBlurRadius(dp(20));
@@ -2496,12 +2837,13 @@ public class BookReaderActivity extends Activity {
 
     private void addSheetLabel(LinearLayout parent, String label, int color) {
         TextView v = new TextView(this);
-        v.setText(label);
+        v.setText(decoratedSheetSection(label));
         v.setTextSize(12.5f);
         v.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         v.setTextColor(color);
-        v.setPadding(dp(3), dp(12), dp(3), dp(6));
-        parent.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        v.setPadding(dp(3), dp(13), dp(3), dp(7));
+        parent.addView(v, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
     private LinearLayout sheetRow() {
@@ -2512,23 +2854,25 @@ public class BookReaderActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams sheetChipLp(boolean spaced) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(42), 1f);
-        if (spaced) lp.leftMargin = dp(7);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        if (spaced) lp.leftMargin = dp(8);
         return lp;
     }
 
     private TextView sheetChip(String label, boolean selected) {
         TextView v = new TextView(this);
-        v.setText(label);
+        v.setText(decoratedSheetChipLabel(label));
         v.setTextSize(12.5f);
         v.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
         v.setGravity(Gravity.CENTER);
         v.setClickable(true);
+        v.setPadding(dp(7), 0, dp(7), 0);
         styleSheetChip(v, selected);
         v.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
                 view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(55L).start();
-            else if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL)
+            else if (event.getActionMasked() == MotionEvent.ACTION_UP ||
+                    event.getActionMasked() == MotionEvent.ACTION_CANCEL)
                 view.animate().scaleX(1f).scaleY(1f).setDuration(110L).start();
             return false;
         });
@@ -2536,20 +2880,12 @@ public class BookReaderActivity extends Activity {
     }
 
     private void styleSheetChip(TextView v, boolean selected) {
-        int bg;
-        int fg;
-        int stroke;
-        if (readerTheme == 2) {
-            bg = selected ? Color.rgb(77, 88, 125) : Color.rgb(43, 45, 50);
-            fg = Color.rgb(238, 241, 247);
-            stroke = selected ? Color.rgb(145, 166, 235) : Color.rgb(70, 73, 80);
-        } else {
-            bg = selected ? Color.rgb(225, 230, 255) : Color.rgb(255, 255, 255);
-            fg = selected ? Color.rgb(57, 65, 145) : Color.rgb(55, 58, 66);
-            stroke = selected ? Color.rgb(151, 161, 225) : Color.rgb(220, 222, 228);
-        }
+        int bg = selected ? readerSelectedSurface() : readerSoftSurface();
+        int fg = selected ? readerAccent() : readerPanelText();
+        int stroke = selected ? readerAccent() : readerPanelStroke();
         v.setTextColor(fg);
-        v.setBackground(glassPanel(bg, dp(15), stroke));
+        v.setBackground(glassPanel(bg, dp(16), stroke));
+        v.setElevation(selected ? dp(2) : 0f);
     }
 
     private void selectSheetChip(TextView[] chips, int selected) {
@@ -2878,6 +3214,8 @@ public class BookReaderActivity extends Activity {
                     readerTheme = which;
                     saveReaderPreferences();
                     applyReaderStyleSmooth(true);
+                    updateChromeTheme();
+                    refreshSelectionBarTheme();
                     dialog.dismiss();
                 })
                 .setNegativeButton("Cancel", null)
@@ -3127,23 +3465,134 @@ public class BookReaderActivity extends Activity {
     private void searchInBook() {
         if (isPdf || webView == null) return;
 
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        int panel = readerPanelBase();
+        int text = readerPanelText();
+        int sub = readerPanelSubText();
+        int accent = readerAccent();
+        int stroke = readerPanelStroke();
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(16), dp(18), dp(18));
+        card.setBackground(glassPanel(panel, dp(25), stroke));
+        card.setElevation(dp(14));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView icon = new TextView(this);
+        icon.setText("⌕");
+        icon.setTextSize(24);
+        icon.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        icon.setTextColor(accent);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(glassPanel(readerSelectedSurface(), dp(22), Color.TRANSPARENT));
+        header.addView(icon, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+        TextView title = new TextView(this);
+        title.setText("Find in chapter");
+        title.setTextSize(22);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setTextColor(text);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        titleLp.leftMargin = dp(12);
+        header.addView(title, titleLp);
+        card.addView(header);
+
+        FrameLayout field = new FrameLayout(this);
+        field.setBackground(glassPanel(readerSoftSurface(), dp(16), accent));
+        LinearLayout.LayoutParams fieldLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
+        fieldLp.topMargin = dp(18);
+        card.addView(field, fieldLp);
+
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("Word or phrase");
-        input.setPadding(dp(20), dp(8), dp(20), dp(8));
+        input.setTextSize(16);
+        input.setTextColor(text);
+        input.setHintTextColor(sub);
+        input.setPadding(dp(16), 0, dp(48), 0);
+        input.setBackgroundColor(Color.TRANSPARENT);
+        field.addView(input, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        new AlertDialog.Builder(this)
-                .setTitle("Find in chapter")
-                .setView(input)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Find", (d, w) -> {
-                    String q = input.getText().toString().trim();
-                    if (!q.isEmpty()) {
-                        webView.findAllAsync(q);
-                        webView.showFindDialog(q, false);
-                    }
-                })
-                .show();
+        TextView clear = new TextView(this);
+        clear.setText("×");
+        clear.setTextSize(22);
+        clear.setTextColor(sub);
+        clear.setGravity(Gravity.CENTER);
+        clear.setOnClickListener(v -> input.setText(""));
+        FrameLayout.LayoutParams clearLp = new FrameLayout.LayoutParams(dp(46), dp(58), Gravity.END);
+        field.addView(clear, clearLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+
+        TextView cancel = new TextView(this);
+        cancel.setText("CANCEL");
+        cancel.setTextSize(13.5f);
+        cancel.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        cancel.setTextColor(accent);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(dp(104), dp(48)));
+
+        TextView find = new TextView(this);
+        find.setText("FIND");
+        find.setTextSize(13.5f);
+        find.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        find.setTextColor(Color.WHITE);
+        find.setGravity(Gravity.CENTER);
+        find.setBackground(glassPanel(accent, dp(20), accent));
+        Runnable runFind = () -> {
+            String q = input.getText().toString().trim();
+            if (q.isEmpty()) return;
+            dialog.dismiss();
+            webView.findAllAsync(q);
+            webView.showFindDialog(q, false);
+        };
+        find.setOnClickListener(v -> runFind.run());
+        LinearLayout.LayoutParams findLp = new LinearLayout.LayoutParams(dp(112), dp(48));
+        findLp.leftMargin = dp(6);
+        actions.addView(find, findLp);
+
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+        actionLp.topMargin = dp(14);
+        card.addView(actions, actionLp);
+
+        input.setOnKeyListener((v, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_UP) {
+                runFind.run();
+                return true;
+            }
+            return false;
+        });
+
+        dialog.setContentView(card);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.48f);
+            int sw = getResources().getDisplayMetrics().widthPixels;
+            window.setLayout(Math.min(sw - dp(28), dp(520)), ViewGroup.LayoutParams.WRAP_CONTENT);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+                window.setBackgroundBlurRadius(dp(24));
+            }
+        }
+        input.requestFocus();
     }
 
     private void toggleBookmark() {
