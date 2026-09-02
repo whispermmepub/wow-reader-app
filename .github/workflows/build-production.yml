@@ -2,6 +2,10 @@ name: Build signed WoW Reader production release
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-production.yml'
 
 permissions:
   contents: read
