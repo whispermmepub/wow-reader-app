@@ -762,6 +762,7 @@ public class BookReaderActivity extends Activity {
     private void saveAnnotation(SelectionData data, String color, String note) {
         ReaderAnnotationStore.add(prefs, bookFile.getName(), currentSpine,
                 data.start, data.end, data.text, color, note);
+        GoogleAutoSync.scheduleSoon(this);
         applySavedAnnotations();
         updateAnnotationButton();
         Toast.makeText(this, note == null || note.trim().isEmpty() ? "Highlighted" : "Note saved",
@@ -831,6 +832,7 @@ public class BookReaderActivity extends Activity {
                 .setPositiveButton("Go to text", (dialog, which) -> goToAnnotation(a))
                 .setNeutralButton("Delete", (dialog, which) -> {
                     ReaderAnnotationStore.remove(prefs, bookFile.getName(), a.id);
+                    GoogleAutoSync.scheduleSoon(this);
                     applySavedAnnotations();
                     updateAnnotationButton();
                     Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
@@ -2942,6 +2944,7 @@ public class BookReaderActivity extends Activity {
                 .putString("epub_reading_mode", readingMode)
                 .putLong("sync_updated_ms", System.currentTimeMillis())
                 .apply();
+        GoogleAutoSync.scheduleSoon(this);
     }
 
     private String readingModeDisplayName() {
@@ -3608,12 +3611,14 @@ public class BookReaderActivity extends Activity {
         super.onResume();
         applyWindowPreferences();
         updateNightLightOverlay();
+        GoogleAutoSync.schedule(this);
         getWindow().getDecorView().postDelayed(this::enterImmersive, 80L);
     }
 
     @Override
     protected void onPause() {
         if (!isPdf) saveEpubState();
+        GoogleAutoSync.flush(this);
         super.onPause();
     }
 

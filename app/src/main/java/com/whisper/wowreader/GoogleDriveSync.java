@@ -90,6 +90,21 @@ final class GoogleDriveSync {
                 .addOnFailureListener(e -> callback.onError(friendly(e)));
     }
 
+    void authorizeSilently(AuthCallback callback) {
+        AuthorizationRequest request = AuthorizationRequest.builder()
+                .setRequestedScopes(SCOPES)
+                .build();
+        authorizationClient.authorize(request)
+                .addOnSuccessListener(result -> {
+                    if (result != null && result.hasResolution()) {
+                        callback.onError("Google account needs reconnect");
+                        return;
+                    }
+                    handleAuthorizationResult(result, callback);
+                })
+                .addOnFailureListener(e -> callback.onError(friendly(e)));
+    }
+
     boolean handleActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode != REQUEST_AUTHORIZE) return false;
         AuthCallback callback = pendingAuthCallback;

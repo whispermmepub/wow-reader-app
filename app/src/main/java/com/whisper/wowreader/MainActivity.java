@@ -1150,7 +1150,7 @@ public class MainActivity extends Activity {
                 .setItems(items,(d,w)->{
                     if(w==0)performGoogleBackup(true);
                     else if(w==1)confirmGoogleRestore();
-                    else if(w==2){prefs.edit().putBoolean("google_sync_enabled",!auto).apply();Toast.makeText(this,"Auto sync "+(!auto?"on":"off"),Toast.LENGTH_SHORT).show();}
+                    else if(w==2){boolean enabled=!auto;prefs.edit().putBoolean("google_sync_enabled",enabled).apply();if(enabled)maybeAutoGoogleSync();else GoogleAutoSync.cancelPending();Toast.makeText(this,"Auto sync "+(enabled?"on":"off"),Toast.LENGTH_SHORT).show();}
                     else if(w==3)connectGoogleAccount(true);
                     else if(w==4)disconnectGoogleAccount();
                     else openManualCloudPicker(w==5);
@@ -1179,8 +1179,9 @@ public class MainActivity extends Activity {
                                 .setNegativeButton("Not now",null).setPositiveButton("Restore",(d,w)->performGoogleRestore()).show();
                     }else{
                         new AlertDialog.Builder(MainActivity.this).setTitle("Google Drive connected")
-                                .setMessage("Auto sync is on. Back up this device now?")
-                                .setNegativeButton("Later",null).setPositiveButton("Back up now",(d,w)->performGoogleBackup(true)).show();
+                                .setMessage("Auto sync is on. WoW Reader will back up changes automatically while keeping books available offline.")
+                                .setPositiveButton("OK",null).show();
+                        maybeAutoGoogleSync();
                     }
                 });
             }
@@ -1200,6 +1201,8 @@ public class MainActivity extends Activity {
     private File readerFontsDir(){File d=new File(getFilesDir(),"reader_fonts");if(!d.exists())d.mkdirs();return d;}
 
     private void performGoogleBackup(boolean showToast){
+        if(GoogleAutoSync.isBusy()){if(showToast)Toast.makeText(this,"Auto sync is already running",Toast.LENGTH_SHORT).show();return;}
+        GoogleAutoSync.cancelPending();
         if(googleSyncBusy){scheduleGoogleSyncRetry(12000L);return;}
         googleSyncBusy=true;
         final long requestedChangeMs=prefs.getLong("sync_updated_ms",0L);
@@ -1237,17 +1240,7 @@ public class MainActivity extends Activity {
     }
 
     private void maybeAutoGoogleSync(){
-        if(prefs==null||googleDrive==null)return;
-        if(!prefs.getBoolean("google_sync_connected",false)||!prefs.getBoolean("google_sync_enabled",true))return;
-        long changed=prefs.getLong("sync_updated_ms",0L);
-        long synced=prefs.getLong("google_last_synced_change_ms",prefs.getLong("google_last_backup_ms",0L));
-        if(changed<=synced)return;
-        if(googleSyncBusy){scheduleGoogleSyncRetry(12000L);return;}
-        long now=System.currentTimeMillis();
-        long remaining=12000L-(now-lastAutoSyncAttemptMs);
-        if(remaining>0L){scheduleGoogleSyncRetry(remaining);return;}
-        lastAutoSyncAttemptMs=now;
-        performGoogleBackup(false);
+        GoogleAutoSync.scheduleSoon(this);
     }
 
     private void scheduleGoogleSyncRetry(long delayMs){
@@ -1258,6 +1251,7 @@ public class MainActivity extends Activity {
     }
 
     private void disconnectGoogleAccount(){
+        GoogleAutoSync.cancelPending();
         GoogleDriveSync.Profile profile=googleProfile;
         Runnable clear=()->runOnUiThread(()->{
             googleProfile=null;
