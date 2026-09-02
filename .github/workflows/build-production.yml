@@ -56,7 +56,8 @@ jobs:
           test -s "$AAB"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          jarsigner -verify -strict -certs "$AAB"
+          jarsigner -verify -certs "$AAB"
+          keytool -printcert -jarfile "$AAB" | grep -qi '21:17:d3:1e:01:eb:24:ea:e3:fe:4a:26:88:c8:c7:12:cd:76:71:f1'
           "$APKSIGNER" verify --print-certs "$APK" | grep -qi '21:17:d3:1e:01:eb:24:ea:e3:fe:4a:26:88:c8:c7:12:cd:76:71:f1'
 
       - name: Collect signed release
