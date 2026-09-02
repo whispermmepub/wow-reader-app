@@ -46,7 +46,8 @@ jobs:
           test -s app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
           test -s app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           test -s app/google-services.json
-          test -s app/src/main/res/drawable/wow_logo.webp
+          test -s app/src/main/res/drawable/wow_logo.xml
+          test -s app/src/main/res/drawable/ic_launcher.xml
           test -s app/src/main/assets/fonts/pyidaungsu.woff2
           test -s app/src/main/assets/fonts/pyidaungsu_native.ttf
           grep -q "versionCode 26" app/build.gradle
