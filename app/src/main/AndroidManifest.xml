@@ -5,7 +5,8 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/wow_logo"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:label="WoW Reader"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
