@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Profile image compression is invoked only from wow-profile-photo, a dedicated worker thread. -->
+    <issue id="WrongThread">
+        <ignore regexp="loaded\.compress\(Bitmap\.CompressFormat\.PNG,95,out\)" />
+    </issue>
+</lint>
