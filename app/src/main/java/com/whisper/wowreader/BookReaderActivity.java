@@ -1816,14 +1816,9 @@ public class BookReaderActivity extends Activity {
         if (webView != null) {
             webView.animate().cancel();
             webView.setAlpha(1f);
-            if (pendingChapterFade && "slide".equals(pageAnimation) && "page".equals(readingMode)) {
-                float offset = (pendingChapterDirection < 0 ? -1f : 1f) * dp(18);
-                webView.setTranslationX(offset);
-                webView.animate().translationX(0f).setDuration(175L)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.35f)).start();
-            } else {
-                webView.setTranslationX(0f);
-            }
+            // Chapter-boundary swaps are intentionally animation-free.
+            // Page animation (None/Slide) still applies to pages inside a chapter.
+            webView.setTranslationX(0f);
         }
         hideInitialReaderLoading();
         pageTurnLocked = false;
@@ -2472,19 +2467,9 @@ public class BookReaderActivity extends Activity {
     }
 
     private void finishChapterFade() {
-        if (!pendingChapterFade || chapterTransitionOverlay == null) return;
-        pendingChapterFade = false;
-        chapterTransitionOverlay.animate().cancel();
-        long duration = "slide".equals(pageAnimation) && "page".equals(readingMode) ? 180L : 92L;
-        float distance = "slide".equals(pageAnimation) && "page".equals(readingMode)
-                ? (pendingChapterDirection < 0 ? 1f : -1f) * dp(36) : 0f;
-        chapterTransitionOverlay.animate()
-                .alpha(0f)
-                .translationX(distance)
-                .setDuration(duration)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.45f))
-                .withEndAction(this::finishChapterFadeImmediate)
-                .start();
+        // Keep the old frame only as a loading mask, then remove it instantly.
+        // No fade, slide or translation is allowed between EPUB chapters.
+        finishChapterFadeImmediate();
     }
 
     private void finishChapterFadeImmediate() {
