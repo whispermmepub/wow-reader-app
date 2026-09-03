@@ -11,12 +11,12 @@ def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAl
 
 android {
     namespace 'com.whisper.wowreader'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.whisper.wowreader'
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode 26
         versionName '2.14.0'
     }
