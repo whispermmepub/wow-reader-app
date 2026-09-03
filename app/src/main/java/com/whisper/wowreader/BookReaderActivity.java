@@ -54,10 +54,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Calendar;
+import java.util.Enumeration;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 public class BookReaderActivity extends Activity {
@@ -3896,6 +3898,60 @@ public class BookReaderActivity extends Activity {
     }
 
     private void unzipEpub(File epub, File dest) throws Exception {
+        // Prefer the ZIP central directory. Some EPUB producers write a wrong
+        // uncompressed size into a local file header while the central directory
+        // is correct. ZipInputStream trusts that broken local value and throws
+        // "invalid entry size"; ZipFile reads the correct central-directory metadata.
+        try {
+            unzipEpubWithCentralDirectory(epub, dest);
+            return;
+        } catch (SecurityException unsafe) {
+            throw unsafe;
+        } catch (Exception centralDirectoryFailure) {
+            // Keep support for unusual streaming ZIPs whose central directory is
+            // incomplete but whose local entries are still readable.
+            resetEpubExtractionDirectory(dest);
+            try {
+                unzipEpubStreaming(epub, dest);
+            } catch (Exception streamingFailure) {
+                streamingFailure.addSuppressed(centralDirectoryFailure);
+                throw streamingFailure;
+            }
+        }
+    }
+
+    private void unzipEpubWithCentralDirectory(File epub, File dest) throws Exception {
+        String destPath = dest.getCanonicalPath() + File.separator;
+        byte[] buffer = new byte[64 * 1024];
+
+        try (ZipFile zip = new ZipFile(epub)) {
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                File out = safeEpubOutput(dest, destPath, entry.getName());
+
+                if (entry.isDirectory()) {
+                    if (!out.mkdirs() && !out.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
+                    continue;
+                }
+
+                File parent = out.getParentFile();
+                if (parent != null && !parent.mkdirs() && !parent.isDirectory())
+                    throw new Exception("Cannot create EPUB folder");
+
+                try (InputStream in = zip.getInputStream(entry);
+                     FileOutputStream fos = new FileOutputStream(out)) {
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (n > 0) fos.write(buffer, 0, n);
+                    }
+                }
+            }
+        }
+    }
+
+    private void unzipEpubStreaming(File epub, File dest) throws Exception {
         String destPath = dest.getCanonicalPath() + File.separator;
 
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(epub))) {
@@ -3903,28 +3959,45 @@ public class BookReaderActivity extends Activity {
             byte[] buffer = new byte[64 * 1024];
 
             while ((entry = zis.getNextEntry()) != null) {
-                File out = new File(dest, entry.getName());
-                String outPath = out.getCanonicalPath();
-
-                if (!outPath.startsWith(destPath))
-                    throw new SecurityException("Unsafe EPUB path");
+                File out = safeEpubOutput(dest, destPath, entry.getName());
 
                 if (entry.isDirectory()) {
-                    out.mkdirs();
+                    if (!out.mkdirs() && !out.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
                 } else {
                     File parent = out.getParentFile();
-                    if (parent != null) parent.mkdirs();
+                    if (parent != null && !parent.mkdirs() && !parent.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
 
                     try (FileOutputStream fos = new FileOutputStream(out)) {
                         int n;
-                        while ((n = zis.read(buffer)) > 0)
-                            fos.write(buffer, 0, n);
+                        while ((n = zis.read(buffer)) != -1) {
+                            if (n > 0) fos.write(buffer, 0, n);
+                        }
                     }
                 }
 
                 zis.closeEntry();
             }
         }
+    }
+
+    private File safeEpubOutput(File dest, String destPath, String entryName) throws Exception {
+        String normalized = entryName == null ? "" : entryName.replace('\\', '/');
+        File out = new File(dest, normalized);
+        String outPath = out.getCanonicalPath();
+        if (!outPath.startsWith(destPath))
+            throw new SecurityException("Unsafe EPUB path");
+        return out;
+    }
+
+    private void resetEpubExtractionDirectory(File dest) throws Exception {
+        File[] children = dest.listFiles();
+        if (children != null) {
+            for (File child : children) deleteRecursive(child);
+        }
+        if (!dest.exists() && !dest.mkdirs())
+            throw new Exception("Cannot prepare EPUB folder");
     }
 
     private void deleteRecursive(File f) {
