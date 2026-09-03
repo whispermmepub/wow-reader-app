@@ -35,7 +35,7 @@ jobs:
       - name: Install Android 16 SDK
         shell: bash
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
 
       - name: Source checks
         shell: bash
