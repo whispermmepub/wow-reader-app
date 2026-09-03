@@ -1,0 +1,245 @@
+name: Apply and validate tolerant EPUB extraction
+
+on:
+  push:
+    branches: [epub-tolerant-extraction]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: github.event.head_commit.message != 'Handle malformed EPUB local entry sizes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: epub-tolerant-extraction
+          fetch-depth: 0
+
+      - name: Apply surgical EPUB extraction patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          reader = Path('app/src/main/java/com/whisper/wowreader/BookReaderActivity.java')
+          text = reader.read_text(encoding='utf-8')
+
+          if 'import java.util.Enumeration;' not in text:
+              text = text.replace('import java.util.Calendar;\n', 'import java.util.Calendar;\nimport java.util.Enumeration;\n')
+          if 'import java.util.zip.ZipFile;' not in text:
+              text = text.replace('import java.util.zip.ZipEntry;\n', 'import java.util.zip.ZipEntry;\nimport java.util.zip.ZipFile;\n')
+
+          pattern = re.compile(r'    private void unzipEpub\(File epub, File dest\) throws Exception \{.*?\n    \}\n\n    private void deleteRecursive', re.S)
+          replacement = r'''    private void unzipEpub(File epub, File dest) throws Exception {
+        // Prefer the ZIP central directory. Some EPUB producers write a wrong
+        // uncompressed size into a local file header while the central directory
+        // is correct. ZipInputStream trusts that broken local value and throws
+        // "invalid entry size"; ZipFile reads the correct central-directory metadata.
+        try {
+            unzipEpubWithCentralDirectory(epub, dest);
+            return;
+        } catch (SecurityException unsafe) {
+            throw unsafe;
+        } catch (Exception centralDirectoryFailure) {
+            // Keep support for unusual streaming ZIPs whose central directory is
+            // incomplete but whose local entries are still readable.
+            resetEpubExtractionDirectory(dest);
+            try {
+                unzipEpubStreaming(epub, dest);
+            } catch (Exception streamingFailure) {
+                streamingFailure.addSuppressed(centralDirectoryFailure);
+                throw streamingFailure;
+            }
+        }
+    }
+
+    private void unzipEpubWithCentralDirectory(File epub, File dest) throws Exception {
+        String destPath = dest.getCanonicalPath() + File.separator;
+        byte[] buffer = new byte[64 * 1024];
+
+        try (ZipFile zip = new ZipFile(epub)) {
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                File out = safeEpubOutput(dest, destPath, entry.getName());
+
+                if (entry.isDirectory()) {
+                    if (!out.mkdirs() && !out.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
+                    continue;
+                }
+
+                File parent = out.getParentFile();
+                if (parent != null && !parent.mkdirs() && !parent.isDirectory())
+                    throw new Exception("Cannot create EPUB folder");
+
+                try (InputStream in = zip.getInputStream(entry);
+                     FileOutputStream fos = new FileOutputStream(out)) {
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (n > 0) fos.write(buffer, 0, n);
+                    }
+                }
+            }
+        }
+    }
+
+    private void unzipEpubStreaming(File epub, File dest) throws Exception {
+        String destPath = dest.getCanonicalPath() + File.separator;
+
+        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(epub))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[64 * 1024];
+
+            while ((entry = zis.getNextEntry()) != null) {
+                File out = safeEpubOutput(dest, destPath, entry.getName());
+
+                if (entry.isDirectory()) {
+                    if (!out.mkdirs() && !out.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
+                } else {
+                    File parent = out.getParentFile();
+                    if (parent != null && !parent.mkdirs() && !parent.isDirectory())
+                        throw new Exception("Cannot create EPUB folder");
+
+                    try (FileOutputStream fos = new FileOutputStream(out)) {
+                        int n;
+                        while ((n = zis.read(buffer)) != -1) {
+                            if (n > 0) fos.write(buffer, 0, n);
+                        }
+                    }
+                }
+
+                zis.closeEntry();
+            }
+        }
+    }
+
+    private File safeEpubOutput(File dest, String destPath, String entryName) throws Exception {
+        String normalized = entryName == null ? "" : entryName.replace('\\', '/');
+        File out = new File(dest, normalized);
+        String outPath = out.getCanonicalPath();
+        if (!outPath.startsWith(destPath))
+            throw new SecurityException("Unsafe EPUB path");
+        return out;
+    }
+
+    private void resetEpubExtractionDirectory(File dest) throws Exception {
+        File[] children = dest.listFiles();
+        if (children != null) {
+            for (File child : children) deleteRecursive(child);
+        }
+        if (!dest.exists() && !dest.mkdirs())
+            throw new Exception("Cannot prepare EPUB folder");
+    }
+
+    private void deleteRecursive'''
+
+          text2, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Could not locate the existing unzipEpub method exactly once')
+          reader.write_text(text2, encoding='utf-8')
+
+          workflow = Path('.github/workflows/build-apk.yml')
+          wf = workflow.read_text(encoding='utf-8')
+          guard = "          grep -q 'prewarmAdjacentChapters' \"$READER\"\n"
+          new_guard = guard + "          grep -q 'unzipEpubWithCentralDirectory' \"$READER\"\n          grep -q 'ZipFile zip = new ZipFile(epub)' \"$READER\"\n"
+          if "unzipEpubWithCentralDirectory" not in wf:
+              if guard not in wf:
+                  raise SystemExit('Could not locate EPUB source-check insertion point')
+              wf = wf.replace(guard, new_guard, 1)
+              workflow.write_text(wf, encoding='utf-8')
+          PY
+
+      - name: Reproduce malformed-local-header regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import struct, zipfile
+          path='/tmp/wow-malformed.epub'
+          with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as z:
+              z.writestr('mimetype','application/epub+zip',compress_type=zipfile.ZIP_STORED)
+              z.writestr('META-INF/container.xml','<container/>')
+              z.writestr('OEBPS/chapter.xhtml','x'*7333)
+          data=bytearray(open(path,'rb').read())
+          target=b'OEBPS/chapter.xhtml'
+          pos=0
+          while True:
+              pos=data.find(b'PK\x03\x04',pos)
+              if pos < 0: raise SystemExit('chapter local header not found')
+              nlen,xlen=struct.unpack_from('<HH',data,pos+26)
+              name=bytes(data[pos+30:pos+30+nlen])
+              if name==target: break
+              pos += 4
+          # Same broken value seen in the reported EPUB: 0x50000000 + 7333.
+          struct.pack_into('<I',data,pos+22,0x50001ca5)
+          open(path,'wb').write(data)
+          PY
+          cat >/tmp/WowZipRegression.java <<'JAVA'
+          import java.io.*;
+          import java.util.*;
+          import java.util.zip.*;
+          public class WowZipRegression {
+              public static void main(String[] args) throws Exception {
+                  File f=new File(args[0]); byte[] b=new byte[8192]; boolean streamingFailed=false;
+                  try(ZipInputStream zis=new ZipInputStream(new FileInputStream(f))){
+                      ZipEntry e; while((e=zis.getNextEntry())!=null){while(zis.read(b)!=-1){} zis.closeEntry();}
+                  } catch(ZipException expected){
+                      streamingFailed=expected.getMessage()!=null && expected.getMessage().contains("invalid entry size");
+                  }
+                  if(!streamingFailed) throw new AssertionError("Malformed local header did not reproduce ZipInputStream failure");
+                  int chapterBytes=0;
+                  try(ZipFile zip=new ZipFile(f)){
+                      ZipEntry e=zip.getEntry("OEBPS/chapter.xhtml");
+                      try(InputStream in=zip.getInputStream(e)){int n; while((n=in.read(b))!=-1) chapterBytes+=n;}
+                  }
+                  if(chapterBytes!=7333) throw new AssertionError("ZipFile central-directory extraction failed: "+chapterBytes);
+                  System.out.println("Regression reproduced; central-directory extraction recovered 7333 bytes.");
+              }
+          }
+          JAVA
+          javac /tmp/WowZipRegression.java
+          java -cp /tmp WowZipRegression /tmp/wow-malformed.epub
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android 16 SDK
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Validate source and release build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'unzipEpubWithCentralDirectory' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'ZipFile zip = new ZipFile(epub)' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
+          grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          git diff --check
+          gradle :app:assembleRelease :app:bundleRelease :app:lintRelease --stacktrace
+
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'AungSoe Moe'
+          git config user.email '61192036+whispermmepub@users.noreply.github.com'
+          git rm .github/workflows/apply-epub-tolerance.yml
+          git add app/src/main/java/com/whisper/wowreader/BookReaderActivity.java .github/workflows/build-apk.yml
+          git commit -m 'Handle malformed EPUB local entry sizes'
+          git push origin HEAD:epub-tolerant-extraction
