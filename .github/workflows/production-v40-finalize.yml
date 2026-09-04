@@ -1,0 +1,135 @@
+name: WoW Reader Production v40 Finalize
+
+on:
+  push:
+    branches:
+      - release/v2.17.0-v40
+    paths:
+      - '.github/workflows/production-v40-finalize.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/v2.17.0-v40
+          fetch-depth: 0
+
+      - name: Import verified Lab v39 app tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/wow-reader-lab
+          git clone --depth 1 --branch feature/lab-v39-coming-soon-reading-polish \
+            https://github.com/whispermmepub/wow-reader-lab.git /tmp/wow-reader-lab
+          rsync -a --delete /tmp/wow-reader-lab/app/ app/
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/build.gradle')
+          s = p.read_text()
+          s = s.replace('versionCode 39', 'versionCode 40')
+          s = s.replace("versionName '2.16.9-lab-v39'", "versionName '2.17.0'")
+          if 'versionCode 40' not in s or "versionName '2.17.0'" not in s:
+              raise SystemExit('v40 version bump failed')
+          p.write_text(s)
+          PY
+
+      - name: Verify stable source contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
+          grep -q "versionCode 40" app/build.gradle
+          grep -q "versionName '2.17.0'" app/build.gradle
+          test -s app/google-services.json
+          grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
+          grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          grep -q 'smartBackup' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          grep -q 'Intent.EXTRA_ALLOW_MULTIPLE,true' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'ReaderAnnotationStore.add' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'prewarmAdjacentChapters' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'Justify · Normal' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'Justify · Auto spacing' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'AppThemePalette.isSupportedTheme' app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q 'Html.FROM_HTML_MODE_LEGACY' app/src/main/java/com/whisper/wowreader/ComingSoonFeed.java
+          grep -q 'JUSTIFICATION_MODE_INTER_CHARACTER' app/src/main/java/com/whisper/wowreader/ComingSoonDetailActivity.java
+          grep -q 'whisper1of.blogspot.com' app/src/main/java/com/whisper/wowreader/ComingSoonFeed.java
+          grep -q 'thetpaingwrites.blogspot.com' app/src/main/java/com/whisper/wowreader/ComingSoonFeed.java
+          grep -q 'youthsbookreflections.blogspot.com' app/src/main/java/com/whisper/wowreader/ComingSoonFeed.java
+          git diff --check
+
+      - name: Commit production v40 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "AungSoe Moe"
+          git config user.email "61192036+whispermmepub@users.noreply.github.com"
+          git add app
+          if git diff --cached --quiet; then
+            echo 'No app changes to commit'
+          else
+            git commit -m "Release stable WoW Reader 2.17.0 (v40)"
+            git push origin HEAD:release/v2.17.0-v40
+          fi
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Compile debug/release and lint
+        run: gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:lintDebug :app:lintRelease --stacktrace
+
+      - name: Smoke check production APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='40'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.0'"
+          "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
+
+      - name: Collect unsigned production APK and signing tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out/tools/lib64
+          cp app/build/outputs/apk/release/app-release-unsigned.apk out/WoW-Reader-v2.17.0-v40-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" out/tools/apksigner.jar
+          cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" out/tools/zipalign
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib64/libc++.so" out/tools/lib64/libc++.so
+          cat > out/ci-verification.txt <<'EOF'
+          WoW Reader Production 2.17.0 / versionCode 40
+          Package: com.whisper.wowreader
+          targetSdk: 36
+          Source: verified Lab v39 app tree promoted to production
+          Debug compile: PASS
+          Release compile: PASS
+          Debug lint: PASS
+          Release lint: PASS
+          APK smoke: PASS
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WoW-Reader-v2.17.0-v40-unsigned
+          path: out/
+          retention-days: 2
