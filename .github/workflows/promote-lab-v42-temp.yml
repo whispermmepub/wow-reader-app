@@ -1,0 +1,116 @@
+name: Promote verified Lab v42 to production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/promote-lab-v42-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout production main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import exact verified Lab v42 app tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/wow-reader-lab
+          git clone https://github.com/whispermmepub/wow-reader-lab.git /tmp/wow-reader-lab
+          git -C /tmp/wow-reader-lab checkout 8ca3efb4ab1f8ea2ac0e55e4b33ce29498339f9a
+          cmp app/google-services.json /tmp/wow-reader-lab/app/google-services.json
+          rsync -a --delete /tmp/wow-reader-lab/app/ app/
+
+      - name: Verify production contract
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
+          grep -q "compileSdk 36" app/build.gradle
+          grep -q "targetSdk 36" app/build.gradle
+          grep -q "versionCode 42" app/build.gradle
+          grep -q "versionName '2.17.2'" app/build.gradle
+          grep -q "myanmar-calendar:1.1.1.RELEASE" app/build.gradle
+          test -s app/google-services.json
+          grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
+          grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          grep -q 'smartBackup' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          test -s app/src/main/java/com/whisper/wowreader/ReadingCalendarActivity.java
+          test -s app/src/main/java/com/whisper/wowreader/ReadingDayActivity.java
+          test -s app/src/main/java/com/whisper/wowreader/ReadingMemoryActivity.java
+          grep -q 'renameShelf' app/src/main/java/com/whisper/wowreader/LibraryShelfStore.java
+          grep -q 'deleteShelf' app/src/main/java/com/whisper/wowreader/LibraryShelfStore.java
+          test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
+          test ! -d cloudflare/telegram-auto-library
+          git diff --check
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android 16 SDK
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Compile debug release and lint
+        run: gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:bundleRelease :app:lintDebug :app:lintRelease --stacktrace
+
+      - name: Smoke check v42 APKs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          DEBUG=app/build/outputs/apk/debug/app-debug.apk
+          RELEASE=app/build/outputs/apk/release/app-release-unsigned.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -s "$DEBUG"
+          test -s "$RELEASE"
+          test -s "$AAB"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          for APK in "$DEBUG" "$RELEASE"; do
+            "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
+            "$AAPT" dump badging "$APK" | grep -q "versionCode='42'"
+            "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.2'"
+            "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
+          done
+
+      - name: Commit production v42 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "AungSoe Moe"
+          git config user.email "61192036+whispermmepub@users.noreply.github.com"
+          git add app
+          git diff --cached --check
+          git commit -m "Promote WoW Reader 2.17.2 v42 reading calendar"
+          git push origin HEAD:main
+
+      - name: Collect device-test and release artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/WoW-Reader-v2.17.2-v42-debug-installable.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk out/WoW-Reader-v2.17.2-v42-release-unsigned.apk
+          cp app/build/outputs/bundle/release/app-release.aab out/WoW-Reader-v2.17.2-v42-release-unsigned.aab
+
+      - name: Upload verified v42 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoW-Reader-v2.17.2-v42-production-source-verified
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
