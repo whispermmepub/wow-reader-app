@@ -1,4 +1,4 @@
-name: Build signed WoW Reader stable v2.17.6 production release
+name: Build signed WoW Reader stable v2.17.7 production release
 
 on:
   workflow_dispatch:
@@ -22,12 +22,14 @@ jobs:
         run: |
           set -euo pipefail
           grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
-          grep -q "versionCode 46" app/build.gradle
-          grep -q "versionName '2.17.6'" app/build.gradle
+          grep -q "versionCode 47" app/build.gradle
+          grep -q "versionName '2.17.7'" app/build.gradle
           test -s app/google-services.json
           grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
           grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
-          grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          ! grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'lastReaderLinkTapMs' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'handleReaderTapResolved' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q 'renderBookSearchResults' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
 
@@ -75,8 +77,8 @@ jobs:
           test -s "$AAB"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='46'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.6'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='47'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.7'"
           "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
@@ -86,15 +88,15 @@ jobs:
       - name: Collect signed release
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.17.6-v46-production.apk
-          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.6-v46-production.aab
+          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.17.7-v47-production.apk
+          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.7-v47-production.aab
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.17.6-v46-production
+          name: WoW-Reader-v2.17.7-v47-production
           path: |
-            WoW-Reader-v2.17.6-v46-production.apk
-            WoW-Reader-v2.17.6-v46-production.aab
+            WoW-Reader-v2.17.7-v47-production.apk
+            WoW-Reader-v2.17.7-v47-production.aab
           if-no-files-found: error
           retention-days: 14
