@@ -1,0 +1,137 @@
+name: Promote approved WoW Reader v2.18.1 v51 to Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/promote-v51-temp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Production
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android 16 SDK
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Import approved Lab v51 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAB="$RUNNER_TEMP/wow-reader-lab"
+          git clone --quiet https://github.com/whispermmepub/wow-reader-lab.git "$LAB"
+          git -C "$LAB" checkout --quiet 4d77ad34a835f82789bd12133633e5389c7f4503
+          rm -rf app
+          cp -a "$LAB/app" app
+          cp "$LAB/.github/workflows/build-apk.yml" .github/workflows/build-apk.yml
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('.github/workflows/build-apk.yml')
+          s = p.read_text()
+          s = s.replace('Build WoW Reader Lab v2.18.1 APK and AAB', 'Build WoW Reader stable v2.18.1 APK and AAB')
+          s = s.replace('name: Source checks', 'name: Stable source checks')
+          s = s.replace('WoW-Reader-Lab-v2.18.1-v51-unsigned.apk', 'WoW-Reader-v2.18.1-v51-release-unsigned.apk')
+          s = s.replace('WoW-Reader-Lab-v2.18.1-v51-unsigned.aab', 'WoW-Reader-v2.18.1-v51-release-unsigned.aab')
+          s = s.replace('name: WoW-Reader-Lab-v2.18.1-v51', 'name: WoW-Reader-v2.18.1-v51-stable')
+          p.write_text(s)
+
+          p = Path('.github/workflows/build-production.yml')
+          s = p.read_text()
+          s = s.replace('stable v2.17.7 production release', 'stable v2.18.1 production release')
+          s = s.replace('versionCode 47', 'versionCode 51')
+          s = s.replace("versionName '2.17.7'", "versionName '2.18.1'")
+          s = s.replace("versionCode='47'", "versionCode='51'")
+          s = s.replace("versionName='2.17.7'", "versionName='2.18.1'")
+          s = s.replace("! grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java", "grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java")
+          s = s.replace('WoW-Reader-v2.17.7-v47-production.apk', 'WoW-Reader-v2.18.1-v51-production.apk')
+          s = s.replace('WoW-Reader-v2.17.7-v47-production.aab', 'WoW-Reader-v2.18.1-v51-production.aab')
+          s = s.replace('name: WoW-Reader-v2.17.7-v47-production', 'name: WoW-Reader-v2.18.1-v51-production')
+          p.write_text(s)
+
+          p = Path('README.md')
+          s = p.read_text()
+          s = s.replace('Version: **2.17.7** (`versionCode 47`)', 'Version: **2.18.1** (`versionCode 51`)')
+          s = s.replace('The same v2.17.7/v47 APK', 'The same v2.18.1/v51 APK')
+          s = s.replace('versionCode must be lower than 47', 'versionCode must be lower than 51')
+          s = s.replace('- Footnote preview card that stays on the current reading location; unstable Show on page navigation has been removed', '- Play Books-style footnote preview card with Show on page and exact return handling')
+          anchor = '- Reading progress and resume with consistent Home/Library progress\n'
+          additions = ('- Auto scroll with manual chapter-return protection and adjustable speed\n'
+                       '- Reader font size up to 300%\n'
+                       '- Custom editable Book Title and Author metadata with restore-to-book-metadata option\n')
+          if additions not in s:
+              s = s.replace(anchor, anchor + additions)
+          p.write_text(s)
+          PY
+
+      - name: Verify Production source guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
+          grep -q "minSdk 23" app/build.gradle
+          grep -q "compileSdk 36" app/build.gradle
+          grep -q "targetSdk 36" app/build.gradle
+          grep -q "versionCode 51" app/build.gradle
+          grep -q "versionName '2.18.1'" app/build.gradle
+          grep -q "autoScrollManualReturnSpine" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "Math.min(300, fontPercent + 10)" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q "Edit title & author" app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q "library_metadata_custom_" app/src/main/java/com/whisper/wowreader/MainActivity.java
+          grep -q "Show on page" app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          test -s app/google-services.json
+          test -s app/src/main/assets/fonts/pyidaungsu_native.ttf
+          test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
+          git diff --check
+
+      - name: Build lint and smoke before promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleRelease :app:bundleRelease :app:lintRelease --stacktrace
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -s "$APK"
+          test -s "$AAB"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
+          "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='51'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.18.1'"
+          "$AAPT" dump badging "$APK" | grep -q "sdkVersion:'23'"
+          "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
+
+      - name: Commit approved v51 Production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app .github/workflows/build-apk.yml .github/workflows/build-production.yml README.md
+          if git diff --cached --quiet; then
+            echo 'Production already matches approved v51.'
+            exit 0
+          fi
+          git commit -m 'Release unified WoW Reader v2.18.1 v51'
+          git push origin HEAD:main
