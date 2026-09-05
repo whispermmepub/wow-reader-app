@@ -1,0 +1,95 @@
+name: Exact restore WoW Reader production v40 app tree
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-restore-v40-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout production main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild app directory from exact stable v40 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          STABLE=afc75339dece9ff175f8d498a9744fc88bbb6a62
+          git cat-file -e "$STABLE^{commit}"
+          rm -rf /tmp/wow-v40-app
+          mkdir -p /tmp/wow-v40-app
+          git archive "$STABLE" app | tar -x -C /tmp/wow-v40-app
+          rm -rf app
+          mv /tmp/wow-v40-app/app app
+          grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
+          grep -q "versionCode 40" app/build.gradle
+          grep -q "versionName '2.17.0'" app/build.gradle
+          test -s app/google-services.json
+          test ! -e app/src/main/java/com/whisper/wowreader/ReadingCalendarActivity.java
+          test ! -e app/src/main/java/com/whisper/wowreader/ReadingDayActivity.java
+          test ! -e app/src/main/java/com/whisper/wowreader/ReadingMemoryActivity.java
+          test ! -e app/src/main/java/com/whisper/wowreader/MyanmarCalendarBridge.java
+          test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
+          grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
+          grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
+          git diff --check
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android 16 SDK
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Verify stable build and lint before commit
+        run: gradle --no-daemon :app:assembleDebug :app:assembleRelease :app:bundleRelease :app:lintDebug :app:lintRelease --stacktrace
+
+      - name: Smoke check stable v40
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG=app/build/outputs/apk/debug/app-debug.apk
+          RELEASE=app/build/outputs/apk/release/app-release-unsigned.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -s "$DEBUG"
+          test -s "$RELEASE"
+          test -s "$AAB"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
+          for APK in "$DEBUG" "$RELEASE"; do
+            "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
+            "$AAPT" dump badging "$APK" | grep -q "versionCode='40'"
+            "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.0'"
+            "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
+          done
+
+      - name: Commit exact stable v40 app tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'AungSoe Moe'
+          git config user.email '61192036+whispermmepub@users.noreply.github.com'
+          git add -A app
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Stable v40 app tree already exact'
+          else
+            git commit -m 'Restore exact WoW Reader stable v2.17.0 v40 app tree'
+            git push origin HEAD:main
+          fi
