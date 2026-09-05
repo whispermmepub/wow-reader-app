@@ -163,6 +163,7 @@ public class BookReaderActivity extends Activity {
     private int pageCountInChapter = 1;
     private boolean pageTurnLocked = false;
     private boolean tapHitTestPending = false;
+    private volatile long lastReaderLinkTapMs = 0L;
     private long lastPageTurnMs = 0L;
     private boolean chapterLoading = false;
     private long lastChapterNavMs = 0L;
@@ -756,8 +757,9 @@ public class BookReaderActivity extends Activity {
         scroll.setVerticalScrollBarEnabled(false);
         TextView body = new TextView(this);
         String text = note.text == null ? "" : note.text.trim();
+        text = text.replaceFirst("(?i)^\\s*Unknown\\s*", "").trim();
         if (text.length() > 7000) text = text.substring(0, 7000).trim() + "…";
-        if (text.isEmpty()) text = "Footnote text could not be previewed. You can still open it on the page.";
+        if (text.isEmpty()) text = "Footnote text could not be previewed.";
         body.setText(text);
         body.setTextSize(15.5f);
         body.setTextColor(readerPanelText());
@@ -766,18 +768,6 @@ public class BookReaderActivity extends Activity {
         scroll.addView(body, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         int maxBody = Math.max(dp(100), (int) (getResources().getDisplayMetrics().heightPixels * 0.34f));
         card.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, maxBody));
-
-        TextView show = new TextView(this);
-        show.setText("Show on page");
-        show.setTextSize(14.5f);
-        show.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        show.setTextColor(readerAccent());
-        show.setGravity(Gravity.CENTER);
-        show.setBackground(glassPanel(readerSelectedSurface(), dp(20), readerPanelStroke()));
-        show.setOnClickListener(v -> { dialog.dismiss(); navigateToFootnote(note); });
-        LinearLayout.LayoutParams showLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        showLp.topMargin = dp(8);
-        card.addView(show, showLp);
 
         dialog.setContentView(card);
         dialog.setOnDismissListener(d -> { if (footnotePreviewDialog == dialog) footnotePreviewDialog = null; });
@@ -1233,6 +1223,16 @@ public class BookReaderActivity extends Activity {
     }
 
     private void handleReaderTap(float x, float y) {
+        if (root == null) return;
+        final float tapX = x;
+        final float tapY = y;
+        root.postDelayed(() -> {
+            if (android.os.SystemClock.elapsedRealtime() - lastReaderLinkTapMs < 500L) return;
+            handleReaderTapResolved(tapX, tapY);
+        }, 120L);
+    }
+
+    private void handleReaderTapResolved(float x, float y) {
         if (webView == null || chapterLoading || tapHitTestPending) return;
 
         final float ratio = x / Math.max(1f, webView.getWidth());
@@ -5243,6 +5243,7 @@ public class BookReaderActivity extends Activity {
 
         @JavascriptInterface
         public boolean onReaderLinkTap(String href, String epubType, String role, String rel, String cssClass, String sourceId, String label) {
+            lastReaderLinkTapMs = android.os.SystemClock.elapsedRealtime();
             if (owner != webView) return false;
             if (footnoteNavigationActive && looksLikeFootnoteBacklink(href, epubType, role, rel, cssClass)) {
                 runOnUiThread(BookReaderActivity.this::restoreFootnoteReturn);
