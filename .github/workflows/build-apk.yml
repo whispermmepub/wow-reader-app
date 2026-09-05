@@ -1,4 +1,4 @@
-name: Build WoW Reader stable v2.17.6 APK and AAB
+name: Build WoW Reader stable v2.17.7 APK and AAB
 
 on:
   push:
@@ -44,8 +44,8 @@ jobs:
           grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
           grep -q "compileSdk 36" app/build.gradle
           grep -q "targetSdk 36" app/build.gradle
-          grep -q "versionCode 46" app/build.gradle
-          grep -q "versionName '2.17.6'" app/build.gradle
+          grep -q "versionCode 47" app/build.gradle
+          grep -q "versionName '2.17.7'" app/build.gradle
           grep -q "myanmar-calendar:1.1.1.RELEASE" app/build.gradle
           grep -q "swiperefreshlayout:1.1.0" app/build.gradle
           test -s app/google-services.json
@@ -60,7 +60,9 @@ jobs:
           grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
           grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           grep -q 'smartBackup' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
-          grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          ! grep -q 'Show on page' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'lastReaderLinkTapMs' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
+          grep -q 'handleReaderTapResolved' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q 'looksLikeFootnoteDestination' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q 'renderBookSearchResults' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
           grep -q 'ReaderSearchIndex.search' app/src/main/java/com/whisper/wowreader/BookReaderActivity.java
@@ -90,8 +92,8 @@ jobs:
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           for APK in "$DEBUG" "$RELEASE"; do
             "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-            "$AAPT" dump badging "$APK" | grep -q "versionCode='46'"
-            "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.6'"
+            "$AAPT" dump badging "$APK" | grep -q "versionCode='47'"
+            "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.7'"
             "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
           done
           unzip -l "$RELEASE" | grep -q 'assets/fonts/pyidaungsu_native.ttf'
@@ -100,17 +102,17 @@ jobs:
       - name: Collect builds
         shell: bash
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk WoW-Reader-v2.17.6-v46-debug.apk
-          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.17.6-v46-release-unsigned.apk
-          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.6-v46-release-unsigned.aab
+          cp app/build/outputs/apk/debug/app-debug.apk WoW-Reader-v2.17.7-v47-debug.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk WoW-Reader-v2.17.7-v47-release-unsigned.apk
+          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.7-v47-release-unsigned.aab
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.17.6-v46-stable
+          name: WoW-Reader-v2.17.7-v47-stable
           path: |
-            WoW-Reader-v2.17.6-v46-debug.apk
-            WoW-Reader-v2.17.6-v46-release-unsigned.apk
-            WoW-Reader-v2.17.6-v46-release-unsigned.aab
+            WoW-Reader-v2.17.7-v47-debug.apk
+            WoW-Reader-v2.17.7-v47-release-unsigned.apk
+            WoW-Reader-v2.17.7-v47-release-unsigned.aab
           if-no-files-found: error
           retention-days: 14
