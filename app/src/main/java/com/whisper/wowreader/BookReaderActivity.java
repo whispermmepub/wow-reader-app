@@ -169,6 +169,35 @@ public class BookReaderActivity extends Activity {
     private int chapterLoadGeneration = 0;
     private long readingSessionStartedElapsedMs = 0L;
 
+    // Footnote/endnote navigation is transient reading UI, not a new reading position.
+    private volatile boolean footnoteReturnArmed = false;
+    private volatile boolean footnoteNavigationActive = false;
+    private int footnoteReturnSpine = -1;
+    private int footnoteReturnProgressPermille = 0;
+    private int footnoteReturnPage = 1;
+    private String footnoteReturnSourceId = "";
+    private String footnoteReturnSourceUrl = "";
+    private long footnoteArmToken = 0L;
+    private Dialog footnotePreviewDialog = null;
+    private String footnotePreviewHref = "";
+    private String footnotePreviewLabel = "";
+    private ReaderSearchIndex.Footnote footnotePreviewNote = null;
+    private boolean footnoteReturnPending = false;
+
+    // Search remains transient until the user intentionally closes it on a result page.
+    private Dialog bookSearchDialog = null;
+    private final List<ReaderSearchIndex.Hit> bookSearchResults = new ArrayList<>();
+    private String bookSearchQuery = "";
+    private boolean searchNavigationActive = false;
+    private int searchCurrentIndex = -1;
+    private int searchReturnSpine = -1;
+    private int searchReturnProgressPermille = 0;
+    private int searchReturnPage = 1;
+    private String pendingSearchQuery = "";
+    private int pendingSearchOccurrence = -1;
+    private LinearLayout searchNavigationBar = null;
+    private TextView searchNavigationLabel = null;
+
     private ParcelFileDescriptor pdfDescriptor;
     private PdfRenderer pdfRenderer;
     private PdfRenderer.Page pdfPage;
@@ -610,6 +639,7 @@ public class BookReaderActivity extends Activity {
                 }
                 final int generation = chapterLoadGeneration;
                 applyReaderStyle(true);
+                installReaderLinkNavigation();
                 webView.postDelayed(() -> {
                     if (generation == chapterLoadGeneration) applySavedAnnotations();
                 }, 520L);
@@ -638,9 +668,269 @@ public class BookReaderActivity extends Activity {
                     }, 3900L);
                 }
             }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                super.doUpdateVisitedHistory(view, url, isReload);
+                if (view == webView) onReaderVisitedUrl(url);
+            }
         };
     }
 
+    private void installReaderLinkNavigation() {
+        if (webView == null) return;
+        String js = "(function(){try{" +
+                "if(window.__wowReaderLinkNavInstalled)return true;window.__wowReaderLinkNavInstalled=true;" +
+                "document.addEventListener('click',function(ev){try{" +
+                "var t=ev.target,a=t&&t.closest?t.closest('a[href]'):null;if(!a)return;" +
+                "var href=a.getAttribute('href')||'',ep=a.getAttribute('epub:type')||a.getAttribute('type')||'';" +
+                "try{ep=ep||a.getAttributeNS('http://www.idpf.org/2007/ops','type')||'';}catch(_e){}" +
+                "var role=a.getAttribute('role')||'',rel=a.getAttribute('rel')||'',cls=(typeof a.className==='string'?a.className:'');" +
+                "var sid='',n=a;for(var i=0;i<5&&n;i++,n=n.parentElement){if(n.id){sid=n.id;break;}}" +
+                "var label=(a.textContent||'').replace(/\s+/g,' ').trim();" +
+                "if(WoW.onReaderLinkTap(href,ep,role,rel,cls,sid,label)){ev.preventDefault();ev.stopImmediatePropagation();return false;}" +
+                "}catch(_e){}},true);return true;}catch(e){return false;}})()";
+        try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private void requestFootnotePreview(String href, String label) {
+        if (webView == null || href == null || href.trim().isEmpty() || spine.isEmpty()) return;
+        footnotePreviewHref = href.trim();
+        footnotePreviewLabel = label == null ? "" : label.trim();
+        final int sourceSpine = currentSpine;
+        final String sourceId = footnoteReturnSourceId;
+        new Thread(() -> {
+            ReaderSearchIndex.Footnote note = ReaderSearchIndex.resolveFootnote(spine, sourceSpine, footnotePreviewHref, sourceId);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                footnotePreviewNote = note;
+                showFootnotePreview(note, footnotePreviewLabel);
+            });
+        }, "wow-footnote-preview").start();
+    }
+
+    private void showFootnotePreview(ReaderSearchIndex.Footnote note, String label) {
+        if (isFinishing() || note == null) return;
+        if (footnotePreviewDialog != null) {
+            try { footnotePreviewDialog.dismiss(); } catch (Exception ignored) {}
+            footnotePreviewDialog = null;
+        }
+        final Dialog dialog = new Dialog(this);
+        footnotePreviewDialog = dialog;
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(10), dp(18), dp(14));
+        card.setBackground(glassPanel(readerPanelBase(), dp(24), readerPanelStroke()));
+        card.setElevation(dp(16));
+
+        View handle = new View(this);
+        handle.setBackground(glassPanel(readerPanelStroke(), dp(3), Color.TRANSPARENT));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(38), dp(5));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        handleLp.bottomMargin = dp(8);
+        card.addView(handle, handleLp);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this);
+        String cleanLabel = label == null ? "" : label.trim();
+        title.setText(cleanLabel.isEmpty() ? "Footnote" : "Footnote " + cleanLabel);
+        title.setTextSize(16f);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setTextColor(readerPanelText());
+        head.addView(title, new LinearLayout.LayoutParams(0, dp(40), 1f));
+        TextView close = new TextView(this);
+        close.setText("×");
+        close.setTextSize(24f);
+        close.setTextColor(readerPanelSubText());
+        close.setGravity(Gravity.CENTER);
+        close.setOnClickListener(v -> dialog.dismiss());
+        head.addView(close, new LinearLayout.LayoutParams(dp(42), dp(40)));
+        card.addView(head);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        TextView body = new TextView(this);
+        String text = note.text == null ? "" : note.text.trim();
+        if (text.length() > 7000) text = text.substring(0, 7000).trim() + "…";
+        if (text.isEmpty()) text = "Footnote text could not be previewed. You can still open it on the page.";
+        body.setText(text);
+        body.setTextSize(15.5f);
+        body.setTextColor(readerPanelText());
+        body.setLineSpacing(dp(3), 1.08f);
+        body.setPadding(dp(2), dp(4), dp(2), dp(8));
+        scroll.addView(body, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int maxBody = Math.max(dp(100), (int) (getResources().getDisplayMetrics().heightPixels * 0.34f));
+        card.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, maxBody));
+
+        TextView show = new TextView(this);
+        show.setText("Show on page");
+        show.setTextSize(14.5f);
+        show.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        show.setTextColor(readerAccent());
+        show.setGravity(Gravity.CENTER);
+        show.setBackground(glassPanel(readerSelectedSurface(), dp(20), readerPanelStroke()));
+        show.setOnClickListener(v -> { dialog.dismiss(); navigateToFootnote(note); });
+        LinearLayout.LayoutParams showLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+        showLp.topMargin = dp(8);
+        card.addView(show, showLp);
+
+        dialog.setContentView(card);
+        dialog.setOnDismissListener(d -> { if (footnotePreviewDialog == dialog) footnotePreviewDialog = null; });
+        dialog.show();
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            win.setDimAmount(0.10f);
+            WindowManager.LayoutParams lp = win.getAttributes();
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            lp.gravity = Gravity.BOTTOM;
+            win.setAttributes(lp);
+        }
+    }
+
+    private void navigateToFootnote(ReaderSearchIndex.Footnote note) {
+        if (webView == null || note == null || spine.isEmpty()) return;
+        footnoteNavigationActive = true;
+        footnoteReturnPending = false;
+        footnoteReturnArmed = false;
+        footnoteArmToken++;
+        int target = Math.max(0, Math.min(spine.size() - 1, note.spineIndex));
+        pendingTocFragment = note.fragment == null ? "" : note.fragment;
+        if (target == currentSpine) {
+            jumpToPendingTocFragment(() -> updateBookmarkIcon());
+            return;
+        }
+        currentSpine = target;
+        currentProgressPermille = 0;
+        loadCurrentEpubChapter();
+    }
+
+    private static String navLower(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT);
+    }
+
+    private boolean looksLikeFootnoteReference(String href, String epubType, String role, String rel, String cssClass) {
+        String meta = navLower(epubType + " " + role + " " + rel + " " + cssClass);
+        if (meta.contains("noteref") || meta.contains("doc-noteref") || meta.contains("footnote-ref") ||
+                meta.contains("footnoteref") || meta.contains("fnref") || meta.contains("endnote-ref")) return true;
+        String h = navLower(href);
+        int hash = h.indexOf('#');
+        String frag = hash >= 0 ? h.substring(hash + 1) : "";
+        frag = Uri.decode(frag).toLowerCase(Locale.ROOT);
+        boolean named = frag.startsWith("fn") || frag.startsWith("_fn") || frag.startsWith("ftn") || frag.startsWith("_ftn") ||
+                frag.contains("footnote") || frag.contains("noteref") || frag.startsWith("note") ||
+                frag.startsWith("endnote") || frag.startsWith("_edn");
+        return named || looksLikeFootnoteDestination(href);
+    }
+
+    private boolean looksLikeFootnoteDestination(String href) {
+        if (href == null || href.indexOf('#') < 0 || spine.isEmpty()) return false;
+        int target = ReaderSearchIndex.resolveTargetSpine(spine, currentSpine, href);
+        if (target < 0 || target >= spine.size()) return false;
+        String title = target < chapterTitles.size() ? chapterTitles.get(target) : "";
+        String file = spine.get(target) == null ? "" : spine.get(target).getName();
+        String meta = navLower(title + " " + file).replace('_', ' ').replace('-', ' ').replace('.', ' ');
+        return meta.matches(".*\b(footnotes?|endnotes?|notes?)\b.*");
+    }
+
+    private boolean looksLikeFootnoteBacklink(String href, String epubType, String role, String rel, String cssClass) {
+        String meta = navLower(epubType + " " + role + " " + rel + " " + cssClass);
+        if (meta.contains("backlink") || meta.contains("doc-backlink") || meta.contains("footnote-back") ||
+                meta.contains("note-back") || meta.contains("fnback")) return true;
+        String source = footnoteReturnSourceId == null ? "" : footnoteReturnSourceId.trim();
+        if (!source.isEmpty() && href != null) {
+            int hash = href.indexOf('#');
+            if (hash >= 0 && hash + 1 < href.length()) {
+                String fragment = Uri.decode(href.substring(hash + 1));
+                if (source.equals(fragment)) return true;
+            }
+        }
+        // Dedicated Notes chapters often use opaque backlink ids. If the note is open and
+        // the tapped internal link resolves back to the exact source spine, treat it as Return.
+        if (footnoteNavigationActive && href != null && href.indexOf('#') >= 0 &&
+                currentSpine != footnoteReturnSpine && footnoteReturnSpine >= 0) {
+            int target = ReaderSearchIndex.resolveTargetSpine(spine, currentSpine, href);
+            if (target == footnoteReturnSpine) return true;
+        }
+        return false;
+    }
+
+    private synchronized void armFootnoteReturn(String sourceId) {
+        if (webView == null || spine.isEmpty() || footnoteNavigationActive) return;
+        footnoteReturnSpine = currentSpine;
+        footnoteReturnProgressPermille = currentProgressPermille;
+        footnoteReturnPage = currentPageInChapter;
+        footnoteReturnSourceId = sourceId == null ? "" : sourceId;
+        String url = webView.getUrl();
+        footnoteReturnSourceUrl = url == null ? "" : url;
+        footnoteReturnArmed = true;
+        long token = ++footnoteArmToken;
+        webView.postDelayed(() -> {
+            synchronized (BookReaderActivity.this) {
+                if (token == footnoteArmToken && footnoteReturnArmed && !footnoteNavigationActive)
+                    footnoteReturnArmed = false;
+            }
+        }, 20000L);
+    }
+
+    private synchronized void onReaderVisitedUrl(String url) {
+        if (!footnoteReturnArmed || footnoteNavigationActive || url == null || url.isEmpty()) return;
+        if (!url.equals(footnoteReturnSourceUrl)) {
+            footnoteNavigationActive = true;
+            footnoteReturnArmed = false;
+        }
+    }
+
+    private void restoreFootnoteReturn() {
+        runOnUiThread(() -> {
+            if ((!footnoteNavigationActive && !footnoteReturnArmed && !footnoteReturnPending) || webView == null || spine.isEmpty()) return;
+            int targetSpine = Math.max(0, Math.min(spine.size() - 1, footnoteReturnSpine));
+            int targetProgress = Math.max(0, Math.min(1000, footnoteReturnProgressPermille));
+            int targetPage = Math.max(1, footnoteReturnPage);
+            footnoteNavigationActive = false;
+            footnoteReturnArmed = false;
+            footnoteReturnPending = true;
+            footnoteArmToken++;
+            currentSpine = targetSpine;
+            currentProgressPermille = targetProgress;
+
+            String expected = Uri.fromFile(spine.get(targetSpine)).toString();
+            String actual = webView.getUrl();
+            if (actual != null) { int hash = actual.indexOf('#'); if (hash >= 0) actual = actual.substring(0, hash); }
+            boolean sameDocument = expected.equals(actual);
+            if (!sameDocument) {
+                pendingTocFragment = footnoteReturnSourceId == null ? "" : footnoteReturnSourceId;
+                loadCurrentEpubChapter();
+                return;
+            }
+            finishFootnoteReturnOnReady(targetPage, targetProgress);
+        });
+    }
+
+    private void finishFootnoteReturnOnReady(int targetPage, int targetProgress) {
+        if (webView == null) { footnoteReturnPending = false; return; }
+        if ("page".equals(readingMode)) {
+            int pageZero = Math.max(0, targetPage - 1);
+            String jump = "(function(){var st=window.__wowPageEngine;if(!st||st.mode!=='page')return false;" +
+                    "st.page=st.clamp(" + pageZero + ",0,(st.count||1)-1);st.apply(false);st.report();return true;})()";
+            try { webView.evaluateJavascript(jump, null); } catch (Exception ignored) {}
+        } else {
+            String jump = "(function(){var h=Math.max(0,document.documentElement.scrollHeight-window.innerHeight);" +
+                    "window.scrollTo(0,h*" + (targetProgress / 1000.0) + ");return true;})()";
+            try { webView.evaluateJavascript(jump, null); } catch (Exception ignored) {}
+        }
+        currentProgressPermille = targetProgress;
+        footnoteReturnPending = false;
+        updateEpubProgress(targetProgress);
+        saveEpubStateOnly();
+    }
 
     private ReaderWebView createPreloadWebView() {
         try {
@@ -2383,6 +2673,8 @@ public class BookReaderActivity extends Activity {
         if (generation != chapterLoadGeneration || !chapterLoading) return;
         emptyChapterSkipCount = 0;
         jumpToPendingTocFragment(() -> {
+            if (footnoteReturnPending) finishFootnoteReturnOnReady(footnoteReturnPage, footnoteReturnProgressPermille);
+            if (searchNavigationActive && pendingSearchOccurrence >= 0) applyPendingSearchHit();
             if (paperGestureChapterBoundary && paperGestureReleased && paperGestureCommit) {
                 finishInteractiveChapterBoundary();
                 return;
@@ -4095,7 +4387,7 @@ public class BookReaderActivity extends Activity {
             positionView.setText(chapter + " · " + percent + "%");
         if (readingSeek != null && !readingSeekDragging)
             readingSeek.setProgress(Math.max(0, Math.min(1000, (int) Math.round(overall * 1000.0))));
-        prefs.edit().putInt("percent_" + bookFile.getName(), percent).apply();
+        if (!footnoteNavigationActive && !footnoteReturnPending && !searchNavigationActive) ReadingProgressStore.set(prefs, bookFile.getName(), percent);
     }
 
     private void updateEpubPageProgress(int page, int count, int p) {
@@ -4106,6 +4398,7 @@ public class BookReaderActivity extends Activity {
     }
 
     private void saveEpubStateOnly() {
+        if (footnoteNavigationActive || footnoteReturnPending || searchNavigationActive) return;
         prefs.edit()
                 .putInt("epub_chapter_" + bookFile.getName(), currentSpine)
                 .putInt("epub_scroll_" + bookFile.getName(), currentProgressPermille)
@@ -4164,136 +4457,350 @@ public class BookReaderActivity extends Activity {
     }
 
     private void searchInBook() {
-        if (isPdf || webView == null) return;
+        if (isPdf || webView == null || spine.isEmpty()) return;
+        if (!searchNavigationActive) {
+            searchReturnSpine = currentSpine;
+            searchReturnProgressPermille = currentProgressPermille;
+            searchReturnPage = currentPageInChapter;
+        }
+        showBookSearch(bookSearchQuery, !bookSearchResults.isEmpty());
+    }
 
-        Dialog dialog = new Dialog(this);
+    private void showBookSearch(String initialQuery, boolean useCachedResults) {
+        if (isFinishing()) return;
+        if (bookSearchDialog != null) {
+            try { bookSearchDialog.dismiss(); } catch (Exception ignored) {}
+            bookSearchDialog = null;
+        }
+        hideSearchNavigationBar();
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar_Fullscreen);
+        bookSearchDialog = dialog;
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setCanceledOnTouchOutside(true);
+        dialog.setCanceledOnTouchOutside(false);
 
-        int panel = readerPanelBase();
+        int bg = readerTheme == 2 ? Color.rgb(18, 18, 18) :
+                (readerTheme == 1 ? Color.rgb(244, 236, 216) : Color.WHITE);
+        int surface = readerPanelBase();
         int text = readerPanelText();
         int sub = readerPanelSubText();
         int accent = readerAccent();
-        int stroke = readerPanelStroke();
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(16), dp(18), dp(18));
-        card.setBackground(glassPanel(panel, dp(25), stroke));
-        card.setElevation(dp(14));
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(bg);
+        page.setPadding(dp(10), dp(12), dp(10), dp(10));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView icon = new TextView(this);
-        icon.setText("⌕");
-        icon.setTextSize(24);
-        icon.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        icon.setTextColor(accent);
-        icon.setGravity(Gravity.CENTER);
-        icon.setBackground(glassPanel(readerSelectedSurface(), dp(22), Color.TRANSPARENT));
-        header.addView(icon, new LinearLayout.LayoutParams(dp(46), dp(46)));
-
-        TextView title = new TextView(this);
-        title.setText("Find in chapter");
-        title.setTextSize(22);
-        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        title.setTextColor(text);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        titleLp.leftMargin = dp(12);
-        header.addView(title, titleLp);
-        card.addView(header);
-
-        FrameLayout field = new FrameLayout(this);
-        field.setBackground(glassPanel(readerSoftSurface(), dp(16), accent));
-        LinearLayout.LayoutParams fieldLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
-        fieldLp.topMargin = dp(18);
-        card.addView(field, fieldLp);
+        header.setBackground(glassPanel(surface, dp(22), readerPanelStroke()));
+        TextView back = new TextView(this);
+        back.setText("‹");
+        back.setTextSize(32);
+        back.setTextColor(text);
+        back.setGravity(Gravity.CENTER);
+        back.setOnClickListener(v -> { dialog.dismiss(); restorePreSearchLocation(); });
+        header.addView(back, new LinearLayout.LayoutParams(dp(50), dp(54)));
 
         EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setHint("Word or phrase");
-        input.setTextSize(16);
-        input.setTextColor(text);
+        input.setHint("Search in book");
         input.setHintTextColor(sub);
-        input.setPadding(dp(16), 0, dp(48), 0);
+        input.setTextColor(text);
+        input.setTextSize(17);
         input.setBackgroundColor(Color.TRANSPARENT);
-        field.addView(input, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        input.setPadding(dp(4), 0, dp(4), 0);
+        input.setText(initialQuery == null ? "" : initialQuery);
+        input.setSelection(input.length());
+        header.addView(input, new LinearLayout.LayoutParams(0, dp(54), 1f));
 
         TextView clear = new TextView(this);
         clear.setText("×");
-        clear.setTextSize(22);
+        clear.setTextSize(24);
         clear.setTextColor(sub);
         clear.setGravity(Gravity.CENTER);
         clear.setOnClickListener(v -> input.setText(""));
-        FrameLayout.LayoutParams clearLp = new FrameLayout.LayoutParams(dp(46), dp(58), Gravity.END);
-        field.addView(clear, clearLp);
+        header.addView(clear, new LinearLayout.LayoutParams(dp(50), dp(54)));
+        page.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        TextView status = new TextView(this);
+        status.setTextSize(12.5f);
+        status.setTextColor(sub);
+        status.setPadding(dp(12), dp(12), dp(12), dp(8));
+        page.addView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
-        TextView cancel = new TextView(this);
-        cancel.setText("CANCEL");
-        cancel.setTextSize(13.5f);
-        cancel.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        cancel.setTextColor(accent);
-        cancel.setGravity(Gravity.CENTER);
-        cancel.setOnClickListener(v -> dialog.dismiss());
-        actions.addView(cancel, new LinearLayout.LayoutParams(dp(104), dp(48)));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        results.setPadding(dp(4), 0, dp(4), dp(20));
+        scroll.addView(results, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        page.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        TextView find = new TextView(this);
-        find.setText("FIND");
-        find.setTextSize(13.5f);
-        find.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        find.setTextColor(Color.WHITE);
-        find.setGravity(Gravity.CENTER);
-        find.setBackground(glassPanel(accent, dp(20), accent));
-        Runnable runFind = () -> {
-            String q = input.getText().toString().trim();
-            if (q.isEmpty()) return;
-            dialog.dismiss();
-            webView.findAllAsync(q);
-            webView.showFindDialog(q, false);
-        };
-        find.setOnClickListener(v -> runFind.run());
-        LinearLayout.LayoutParams findLp = new LinearLayout.LayoutParams(dp(112), dp(48));
-        findLp.leftMargin = dp(6);
-        actions.addView(find, findLp);
+        dialog.setContentView(page);
+        dialog.setOnDismissListener(d -> { if (bookSearchDialog == dialog) bookSearchDialog = null; });
+        dialog.show();
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setStatusBarColor(bg);
+            win.setNavigationBarColor(bg);
+            win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
 
-        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
-        actionLp.topMargin = dp(14);
-        card.addView(actions, actionLp);
-
-        input.setOnKeyListener((v, keyCode, event) -> {
-            if (keyCode == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_UP) {
-                runFind.run();
-                return true;
+        final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable[] pending = new Runnable[1];
+        final int[] localGeneration = {0};
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                if (pending[0] != null) handler.removeCallbacks(pending[0]);
+                String q = value == null ? "" : value.toString().trim();
+                bookSearchQuery = q;
+                if (q.isEmpty()) {
+                    bookSearchResults.clear();
+                    results.removeAllViews();
+                    status.setText("Type a word or phrase");
+                    return;
+                }
+                int token = ++localGeneration[0];
+                pending[0] = () -> performBookSearch(q, token, localGeneration, results, status, accent, text, sub, surface, dialog);
+                handler.postDelayed(pending[0], 260L);
             }
-            return false;
+            @Override public void afterTextChanged(android.text.Editable e) {}
         });
 
-        dialog.setContentView(card);
-        dialog.show();
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            window.setDimAmount(0.48f);
-            int sw = getResources().getDisplayMetrics().widthPixels;
-            window.setLayout(Math.min(sw - dp(28), dp(520)), ViewGroup.LayoutParams.WRAP_CONTENT);
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
-                window.setBackgroundBlurRadius(dp(24));
-            }
+        if (useCachedResults && initialQuery != null && !initialQuery.trim().isEmpty() && !bookSearchResults.isEmpty()) {
+            renderBookSearchResults(results, status, accent, text, sub, surface, dialog);
+        } else if (initialQuery != null && !initialQuery.trim().isEmpty()) {
+            int token = ++localGeneration[0];
+            performBookSearch(initialQuery.trim(), token, localGeneration, results, status, accent, text, sub, surface, dialog);
+        } else {
+            status.setText("Type a word or phrase");
         }
+
         input.requestFocus();
+        input.postDelayed(() -> {
+            try {
+                android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            } catch (Exception ignored) {}
+        }, 160L);
+    }
+
+    private void performBookSearch(String q, int token, int[] localGeneration, LinearLayout results, TextView status,
+                                   int accent, int text, int sub, int surface, Dialog dialog) {
+        status.setText("Searching the whole book…");
+        results.removeAllViews();
+        new Thread(() -> {
+            List<ReaderSearchIndex.Hit> found = ReaderSearchIndex.search(spine, chapterTitles, q, 350);
+            runOnUiThread(() -> {
+                if (dialog != bookSearchDialog || !dialog.isShowing() || token != localGeneration[0]) return;
+                bookSearchQuery = q;
+                bookSearchResults.clear();
+                bookSearchResults.addAll(found);
+                renderBookSearchResults(results, status, accent, text, sub, surface, dialog);
+            });
+        }, "wow-book-search").start();
+    }
+
+    private void renderBookSearchResults(LinearLayout results, TextView status, int accent, int text, int sub, int surface, Dialog dialog) {
+        results.removeAllViews();
+        int count = bookSearchResults.size();
+        status.setText(count == 0 ? "No matches" : count + (count == 1 ? " result" : " results") + " in this book");
+        for (int i = 0; i < count; i++) {
+            ReaderSearchIndex.Hit hit = bookSearchResults.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(dp(14), dp(13), dp(14), dp(13));
+            row.setBackground(glassPanel(surface, dp(15), readerPanelStroke()));
+
+            TextView snippet = new TextView(this);
+            snippet.setTextSize(16f);
+            snippet.setTextColor(text);
+            snippet.setLineSpacing(dp(2), 1.05f);
+            snippet.setText(highlightSearchText(hit.snippet, bookSearchQuery, accent));
+            row.addView(snippet, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            TextView where = new TextView(this);
+            where.setText("⌕  " + hit.chapter);
+            where.setTextSize(12.5f);
+            where.setTextColor(sub);
+            where.setPadding(0, dp(7), 0, 0);
+            row.addView(where, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            final int index = i;
+            row.setOnClickListener(v -> { dialog.dismiss(); navigateToSearchHit(index); });
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = dp(8);
+            results.addView(row, rowLp);
+        }
+    }
+
+    private CharSequence highlightSearchText(String source, String query, int accent) {
+        String value = source == null ? "" : source;
+        android.text.SpannableString span = new android.text.SpannableString(value);
+        if (query == null || query.trim().isEmpty()) return span;
+        String low = value.toLowerCase(Locale.ROOT);
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        int from = 0;
+        while (from <= low.length() - q.length()) {
+            int at = low.indexOf(q, from);
+            if (at < 0) break;
+            span.setSpan(new android.text.style.BackgroundColorSpan(Color.argb(105, Color.red(accent), Color.green(accent), Color.blue(accent))),
+                    at, at + q.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            from = at + Math.max(1, q.length());
+        }
+        return span;
+    }
+
+    private void navigateToSearchHit(int index) {
+        if (index < 0 || index >= bookSearchResults.size() || spine.isEmpty()) return;
+        searchNavigationActive = true;
+        searchCurrentIndex = index;
+        ReaderSearchIndex.Hit hit = bookSearchResults.get(index);
+        pendingSearchQuery = bookSearchQuery;
+        pendingSearchOccurrence = hit.occurrence;
+        hideControls();
+        int target = Math.max(0, Math.min(spine.size() - 1, hit.spineIndex));
+        if (target != currentSpine) {
+            currentSpine = target;
+            currentProgressPermille = 0;
+            loadCurrentEpubChapter();
+        } else {
+            applyPendingSearchHit();
+        }
+        showSearchNavigationBar();
+    }
+
+    private void applyPendingSearchHit() {
+        if (!searchNavigationActive || webView == null || pendingSearchOccurrence < 0 || pendingSearchQuery == null || pendingSearchQuery.isEmpty()) return;
+        final String query = pendingSearchQuery;
+        final int wanted = pendingSearchOccurrence;
+        pendingSearchOccurrence = -1;
+        String script = "(function(){try{" +
+                "var root=document.getElementById('wow-page-flow')||document.body;if(!root)return 'no-root';" +
+                "var old=root.querySelectorAll('span.wow-search-hit');for(var z=0;z<old.length;z++){var o=old[z],p=o.parentNode;while(o.firstChild)p.insertBefore(o.firstChild,o);p.removeChild(o);}" +
+                "var q=" + jsQuote(query.toLowerCase(Locale.ROOT)) + ",target=" + wanted + ",seen=0,w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null,false),n;" +
+                "var pick=function(n,at){var r=document.createRange();r.setStart(n,at);r.setEnd(n,at+q.length);var sp=document.createElement('span');sp.className='wow-search-hit';sp.style.background='rgba(128,203,196,.50)';sp.style.borderRadius='3px';r.surroundContents(sp);" +
+                "var st=window.__wowPageEngine;if(st&&st.mode==='page'){var cp=st.physical?st.physical():(st.page||0),bb=sp.getBoundingClientRect(),docX=(bb.left-(st.marginPx||0))+(cp*(st.step||window.innerWidth||1)),phys=Math.max(0,Math.floor((docX+2)/(st.step||window.innerWidth||1)));st.page=st.nearestLogical?st.nearestLogical(phys):phys;st.apply(false);st.report();}else sp.scrollIntoView({block:'center'});return true;};" +
+                "while((n=w.nextNode())){var raw=n.nodeValue||'',low=raw.toLocaleLowerCase(),from=0,at;while((at=low.indexOf(q,from))>=0){if(seen===target)return pick(n,at)?'ok':'fail';seen++;from=at+Math.max(1,q.length);}}" +
+                "return 'missing';}catch(e){return 'error';}})()";
+        try { webView.evaluateJavascript(script, null); } catch (Exception ignored) {}
+        updateSearchNavigationLabel();
+    }
+
+    private void showSearchNavigationBar() {
+        if (root == null) return;
+        if (searchNavigationBar == null) {
+            LinearLayout bar = new LinearLayout(this);
+            searchNavigationBar = bar;
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setPadding(dp(6), dp(4), dp(6), dp(4));
+            bar.setBackground(glassPanel(readerPanelBase(), dp(20), readerPanelStroke()));
+            bar.setElevation(dp(18));
+
+            TextView close = new TextView(this);
+            close.setText("×");
+            close.setTextSize(25);
+            close.setTextColor(readerPanelText());
+            close.setGravity(Gravity.CENTER);
+            close.setOnClickListener(v -> closeSearchNavigation(false));
+            bar.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+            searchNavigationLabel = new TextView(this);
+            searchNavigationLabel.setTextSize(13.5f);
+            searchNavigationLabel.setTextColor(readerPanelText());
+            searchNavigationLabel.setMaxLines(2);
+            searchNavigationLabel.setGravity(Gravity.CENTER_VERTICAL);
+            bar.addView(searchNavigationLabel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+
+            TextView prev = new TextView(this);
+            prev.setText("‹");
+            prev.setTextSize(28);
+            prev.setTextColor(readerPanelText());
+            prev.setGravity(Gravity.CENTER);
+            prev.setOnClickListener(v -> {
+                if (!bookSearchResults.isEmpty()) navigateToSearchHit((searchCurrentIndex - 1 + bookSearchResults.size()) % bookSearchResults.size());
+            });
+            TextView next = new TextView(this);
+            next.setText("›");
+            next.setTextSize(28);
+            next.setTextColor(readerPanelText());
+            next.setGravity(Gravity.CENTER);
+            next.setOnClickListener(v -> {
+                if (!bookSearchResults.isEmpty()) navigateToSearchHit((searchCurrentIndex + 1) % bookSearchResults.size());
+            });
+            bar.addView(prev, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            bar.addView(next, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58), Gravity.BOTTOM);
+            lp.leftMargin = dp(12);
+            lp.rightMargin = dp(12);
+            lp.bottomMargin = dp(18);
+            root.addView(bar, lp);
+        }
+        searchNavigationBar.setBackground(glassPanel(readerPanelBase(), dp(20), readerPanelStroke()));
+        tintChromeChildren(searchNavigationBar, readerPanelText());
+        searchNavigationBar.setVisibility(View.VISIBLE);
+        searchNavigationBar.bringToFront();
+        updateSearchNavigationLabel();
+    }
+
+    private void updateSearchNavigationLabel() {
+        if (searchNavigationLabel == null) return;
+        int count = bookSearchResults.size();
+        String where = currentSpine >= 0 && currentSpine < spine.size() ? chapterDisplayTitle(currentSpine) : "";
+        searchNavigationLabel.setText(bookSearchQuery + "\n" + (searchCurrentIndex + 1) + " of " + Math.max(1, count) +
+                (where.isEmpty() ? "" : " · " + where));
+    }
+
+    private void hideSearchNavigationBar() {
+        if (searchNavigationBar != null) searchNavigationBar.setVisibility(View.GONE);
+    }
+
+    private void closeSearchNavigation(boolean restoreOriginal) {
+        hideSearchNavigationBar();
+        searchNavigationActive = false;
+        pendingSearchOccurrence = -1;
+        clearSearchHighlight();
+        if (restoreOriginal) {
+            restorePreSearchLocation();
+        } else {
+            updateEpubProgress(currentProgressPermille);
+            saveEpubStateOnly();
+            showControls();
+        }
+    }
+
+    private void clearSearchHighlight() {
+        if (webView == null) return;
+        try {
+            webView.evaluateJavascript("(function(){var a=document.querySelectorAll('span.wow-search-hit');for(var i=0;i<a.length;i++){var s=a[i],p=s.parentNode;while(s.firstChild)p.insertBefore(s.firstChild,s);p.removeChild(s);}return true;})()", null);
+        } catch (Exception ignored) {}
+    }
+
+    private void restorePreSearchLocation() {
+        hideSearchNavigationBar();
+        searchNavigationActive = false;
+        pendingSearchOccurrence = -1;
+        clearSearchHighlight();
+        if (searchReturnSpine < 0 || spine.isEmpty()) {
+            showControls();
+            return;
+        }
+        int target = Math.max(0, Math.min(spine.size() - 1, searchReturnSpine));
+        currentProgressPermille = searchReturnProgressPermille;
+        if (target != currentSpine) {
+            currentSpine = target;
+            loadCurrentEpubChapter();
+        } else if ("page".equals(readingMode)) {
+            int pageZero = Math.max(0, searchReturnPage - 1);
+            try {
+                webView.evaluateJavascript("(function(){var st=window.__wowPageEngine;if(!st)return;st.page=st.clamp(" + pageZero + ",0,(st.count||1)-1);st.apply(false);st.report();})()", null);
+            } catch (Exception ignored) {}
+        }
+        showControls();
     }
 
     private void toggleBookmark() {
@@ -4735,6 +5242,27 @@ public class BookReaderActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean onReaderLinkTap(String href, String epubType, String role, String rel, String cssClass, String sourceId, String label) {
+            if (owner != webView) return false;
+            if (footnoteNavigationActive && looksLikeFootnoteBacklink(href, epubType, role, rel, cssClass)) {
+                runOnUiThread(BookReaderActivity.this::restoreFootnoteReturn);
+                return true;
+            }
+            if (looksLikeFootnoteReference(href, epubType, role, rel, cssClass)) {
+                final String targetHref = href == null ? "" : href;
+                final String targetLabel = label == null ? "" : label;
+                final String targetSourceId = sourceId == null ? "" : sourceId;
+                runOnUiThread(() -> {
+                    if (isFinishing() || owner != webView) return;
+                    armFootnoteReturn(targetSourceId);
+                    requestFootnotePreview(targetHref, targetLabel);
+                });
+                return true;
+            }
+            return false;
+        }
+
+        @JavascriptInterface
         public void onSelection(String text, int start, int end) {
             if (owner != webView) return;
             runOnUiThread(() -> onWebSelection(text, start, end));
@@ -4853,6 +5381,9 @@ public class BookReaderActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (bookSearchDialog != null && bookSearchDialog.isShowing()) { bookSearchDialog.dismiss(); restorePreSearchLocation(); return; }
+        if (!isPdf && searchNavigationActive) { showBookSearch(bookSearchQuery, true); return; }
+        if (!isPdf && (footnoteNavigationActive || footnoteReturnPending)) { restoreFootnoteReturn(); return; }
         if (!isPdf) saveEpubState();
         finish();
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);

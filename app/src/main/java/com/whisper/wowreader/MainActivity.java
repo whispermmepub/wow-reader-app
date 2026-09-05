@@ -50,6 +50,7 @@ import java.util.Locale;
 
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends Activity {
     private static final int REQ_IMPORT = 1001;
@@ -59,6 +60,7 @@ public class MainActivity extends Activity {
     private File coverCacheDir;
     private LinearLayout booksContainer;
     private RecyclerView libraryRecycler;
+    private SwipeRefreshLayout swipeRefresh;
     private LibraryAdapter libraryAdapter;
     private final List<File> visibleBooks = new ArrayList<>();
     private EditText searchInput;
@@ -95,6 +97,7 @@ public class MainActivity extends Activity {
     private Runnable googleSyncRetryRunnable;
     private volatile boolean metadataWarmupRunning = false;
     private boolean homeMode = true;
+    private boolean readerUiRefreshPending = false;
     private final Collator myanmarCollator = Collator.getInstance(new Locale("my", "MM"));
     private final Collator englishCollator = Collator.getInstance(Locale.ENGLISH);
 
@@ -133,7 +136,11 @@ public class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); handleIncomingIntent(intent); }
     @Override protected void onResume() {
         super.onResume();
-        if (libraryRecycler != null) refreshLibrary();
+        if (readerUiRefreshPending) {
+            readerUiRefreshPending = false;
+            if (homeMode) buildUi();
+            else if (libraryRecycler != null) refreshLibrary();
+        } else if (libraryRecycler != null) refreshLibrary();
         maybeAutoGoogleSync();
     }
 
@@ -180,7 +187,26 @@ public class MainActivity extends Activity {
             if (width > 0 && width != oldRight - oldLeft)
                 libraryRecycler.post(() -> updateLibraryColumnsForWidth(width));
         });
-        root.addView(libraryRecycler, new FrameLayout.LayoutParams(
+        swipeRefresh = new SwipeRefreshLayout(this);
+        swipeRefresh.setColorSchemeColors(themeAccent());
+        swipeRefresh.setProgressBackgroundColorSchemeColor(themeCardSurface());
+        swipeRefresh.setDistanceToTriggerSync(dp(72));
+        swipeRefresh.setSlingshotDistance(dp(96));
+        swipeRefresh.addView(libraryRecycler, new SwipeRefreshLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        swipeRefresh.setOnRefreshListener(() -> {
+            if (homeMode) {
+                // Rebuild Home so Continue Reading and every progress badge read the latest shared value.
+                swipeRefresh.postDelayed(this::buildUi, 180L);
+            } else {
+                refreshLibrary();
+                maybeAutoGoogleSync();
+                swipeRefresh.postDelayed(() -> {
+                    if (swipeRefresh != null) swipeRefresh.setRefreshing(false);
+                }, 260L);
+            }
+        });
+        root.addView(swipeRefresh, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         View premiumBottomNav = buildBottomNavigation();
@@ -513,7 +539,7 @@ public class MainActivity extends Activity {
             String author = cachedLibraryAuthor(f);
             String authorLower = author.toLowerCase(Locale.ROOT);
             if (!authorFilter.isEmpty() && !authorFilter.equals(author)) continue;
-            int progress = prefs.getInt("percent_" + f.getName(), 0);
+            int progress = ReadingProgressStore.get(prefs, f.getName());
             if (!matchesLibraryStatus(progress)) continue;
             if (!shelfFilter.isEmpty() && !LibraryShelfStore.contains(prefs, shelfFilter, f.getName())) continue;
             if (searchQuery.isEmpty() || cachedTitle.contains(searchQuery) || fileTitle.contains(searchQuery) || authorLower.contains(searchQuery))
@@ -698,7 +724,7 @@ public class MainActivity extends Activity {
         title.setPadding(dp(2), dp(9), dp(2), 0);
         card.addView(title);
 
-        int progress = prefs.getInt("percent_" + file.getName(), 0);
+        int progress = ReadingProgressStore.get(prefs, file.getName());
         TextView meta = new TextView(this);
         meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "%");
         meta.setTextSize(10.5f);
@@ -762,7 +788,7 @@ public class MainActivity extends Activity {
         title.setMaxLines(2);
         text.addView(title);
 
-        int progress = prefs.getInt("percent_" + file.getName(), 0);
+        int progress = ReadingProgressStore.get(prefs, file.getName());
         TextView meta = new TextView(this);
         meta.setText((file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf") ? "PDF" : "EPUB") + " · " + progress + "% read");
         meta.setTextSize(12);
@@ -963,7 +989,7 @@ public class MainActivity extends Activity {
         });
         java.util.List<File> preferred = new java.util.ArrayList<>();
         for (File f : books) {
-            int p = prefs.getInt("percent_" + f.getName(), 0);
+            int p = ReadingProgressStore.get(prefs, f.getName());
             if (p > 0 && p < 100) preferred.add(f);
         }
         if (preferred.isEmpty()) {
@@ -1052,7 +1078,7 @@ public class MainActivity extends Activity {
         meta.setPadding(0, dp(5), 0, 0);
         copy.addView(meta);
 
-        int progress = prefs.getInt("percent_" + file.getName(), 0);
+        int progress = ReadingProgressStore.get(prefs, file.getName());
         TextView progressText = new TextView(this);
         progressText.setText(progress + (featured ? "% complete" : "%"));
         progressText.setTextSize(featured ? 11.5f : 10.5f);
@@ -1414,6 +1440,10 @@ public class MainActivity extends Activity {
         dialog.setCanceledOnTouchOutside(true);
 
         LinearLayout sheet = premiumSheet("Reading statistics", "Your reading activity", dialog);
+        sheet.addView(statSheetActionRow("▦", "Reading calendar", "Myanmar calendar · books and memories by day", "Open  ›", themeAccent(), () -> {
+            dialog.dismiss();
+            startActivity(new Intent(this, ReadingCalendarActivity.class));
+        }));
         sheet.addView(statSheetRow("◷", "Today", "Time spent reading today", formatReadingTimeLong(stats.todayMs), themeAccent()));
         sheet.addView(statSheetRow("♨", "Current streak", "Keep the reading habit going",
                 stats.currentStreak + (stats.currentStreak == 1 ? " day" : " days"), Color.rgb(231, 111, 55)));
@@ -1424,6 +1454,13 @@ public class MainActivity extends Activity {
         sheet.addView(statSheetRow("◷", "Total reading time", "All time spent reading",
                 formatReadingTimeLong(stats.totalMs), themeAccent()));
         presentBottomSheet(dialog, sheet, 0.82f);
+    }
+
+    private View statSheetActionRow(String iconText, String title, String subtitle, String value, int accent, Runnable action) {
+        View row = statSheetRow(iconText, title, subtitle, value, accent);
+        row.setClickable(true);
+        row.setOnClickListener(v -> action.run());
+        return row;
     }
 
     private View statSheetRow(String iconText, String title, String subtitle, String value, int accent) {
@@ -1537,6 +1574,9 @@ public class MainActivity extends Activity {
         TextView newShelf = filterChoice("＋ New", false);
         newShelf.setOnClickListener(v -> { dialog.dismiss(); showCreateShelfDialog(null); });
         LinearLayout.LayoutParams newLp = new LinearLayout.LayoutParams(dp(82), dp(38)); newLp.leftMargin = dp(6); shelfRow.addView(newShelf, newLp);
+        TextView manageShelf = filterChoice("Manage", false);
+        manageShelf.setOnClickListener(v -> { dialog.dismiss(); showShelvesDialog(); });
+        LinearLayout.LayoutParams manageLp = new LinearLayout.LayoutParams(dp(82), dp(38)); manageLp.leftMargin = dp(6); shelfRow.addView(manageShelf, manageLp);
         shelfScroll.addView(shelfRow);
         sheet.addView(shelfScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
@@ -1645,11 +1685,7 @@ public class MainActivity extends Activity {
         }));
         for (String shelf : shelves) {
             int count = LibraryShelfStore.count(prefs, shelf);
-            list.addView(premiumChoiceRow(shelf, count + (count == 1 ? " book" : " books"), shelf.equals(shelfFilter), () -> {
-                shelfFilter = shelf;
-                refreshLibrary();
-                dialog.dismiss();
-            }));
+            list.addView(premiumShelfRow(shelf, count, shelf.equals(shelfFilter), dialog));
         }
         list.addView(premiumChoiceRow("＋ New shelf", "Create a collection", false, () -> {
             dialog.dismiss();
@@ -1658,6 +1694,163 @@ public class MainActivity extends Activity {
         int h = Math.min(dp(420), Math.max(dp(120), (shelves.size() + 2) * dp(58)));
         sheet.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h));
         presentBottomSheet(dialog, sheet, 0.82f);
+    }
+
+    private View premiumShelfRow(String shelf, int count, boolean selected, android.app.Dialog parentDialog) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(4), dp(6), dp(4));
+        row.setBackground(roundRect(selected ? themeSelectedSurface() : themeControlSurface(),
+                dp(15), dp(1), selected ? themeAccent() : themeStroke()));
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this);
+        title.setText(shelf);
+        title.setTextSize(13f);
+        title.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
+        title.setTextColor(selected ? themeAccent() : themePrimaryText());
+        copy.addView(title);
+        TextView sub = new TextView(this);
+        sub.setText(count + (count == 1 ? " book" : " books"));
+        sub.setTextSize(9.5f);
+        sub.setTextColor(themeSecondaryText());
+        copy.addView(sub);
+        copy.setClickable(true);
+        copy.setOnClickListener(v -> {
+            shelfFilter = shelf;
+            refreshLibrary();
+            parentDialog.dismiss();
+        });
+        row.addView(copy, new LinearLayout.LayoutParams(0, dp(46), 1f));
+
+        TextView more = new TextView(this);
+        more.setText("⋮");
+        more.setTextSize(20);
+        more.setTextColor(themeSecondaryText());
+        more.setGravity(Gravity.CENTER);
+        more.setContentDescription("Shelf options");
+        more.setBackground(roundRect(themeCardSurface(), dp(15), dp(1), themeStroke()));
+        more.setOnClickListener(v -> {
+            parentDialog.dismiss();
+            showShelfManageDialog(shelf);
+        });
+        row.addView(more, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        lp.topMargin = dp(6);
+        row.setLayoutParams(lp);
+        return row;
+    }
+
+    private void showShelfManageDialog(String shelf) {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout sheet = premiumSheet("Shelf options", shelf, dialog);
+        sheet.addView(premiumChoiceRow("Rename shelf", "Keep all books in this shelf", false, () -> {
+            dialog.dismiss();
+            showRenameShelfDialog(shelf);
+        }));
+
+        TextView delete = new TextView(this);
+        delete.setText("⌫   Delete shelf");
+        delete.setTextSize(13f);
+        delete.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        delete.setTextColor(Color.rgb(205, 63, 63));
+        delete.setGravity(Gravity.CENTER_VERTICAL);
+        delete.setPadding(dp(14), 0, dp(14), 0);
+        delete.setBackground(roundRect(isBlackAppTheme() ? Color.rgb(55, 35, 38) : Color.rgb(255, 247, 247), dp(15), dp(1), Color.rgb(222, 150, 150)));
+        delete.setOnClickListener(v -> {
+            dialog.dismiss();
+            confirmDeleteShelf(shelf);
+        });
+        LinearLayout.LayoutParams deleteLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+        deleteLp.topMargin = dp(8);
+        sheet.addView(delete, deleteLp);
+        presentBottomSheet(dialog, sheet, 0.62f);
+    }
+
+    private void showRenameShelfDialog(String oldName) {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout sheet = premiumSheet("Rename shelf", "Books stay in the shelf", dialog);
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(oldName);
+        input.setSelection(input.length());
+        input.setTextSize(14f);
+        input.setTextColor(themePrimaryText());
+        input.setPadding(dp(14), 0, dp(14), 0);
+        input.setBackground(roundRect(themeControlSurface(), dp(16), dp(1), themeStroke()));
+        sheet.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        TextView cancel = filterChoice("Cancel", false);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        TextView save = filterChoice("Rename", true);
+        save.setTextColor(Color.WHITE);
+        save.setBackground(roundRect(themeAccent(), dp(17), 0, 0));
+        save.setOnClickListener(v -> {
+            String next = input.getText().toString().trim();
+            if (!LibraryShelfStore.renameShelf(prefs, oldName, next)) {
+                Toast.makeText(this, "Use a new, unique shelf name", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (oldName.equals(shelfFilter)) shelfFilter = next;
+            dialog.dismiss();
+            refreshLibrary();
+            maybeAutoGoogleSync();
+            showShelvesDialog();
+        });
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(dp(94), dp(40)); cancelLp.rightMargin = dp(8);
+        actions.addView(cancel, cancelLp);
+        actions.addView(save, new LinearLayout.LayoutParams(dp(104), dp(40)));
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)); actionLp.topMargin = dp(9);
+        sheet.addView(actions, actionLp);
+        presentBottomSheet(dialog, sheet, 0.62f);
+        input.requestFocus();
+    }
+
+    private void confirmDeleteShelf(String shelf) {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        LinearLayout sheet = premiumSheet("Delete shelf?", shelf, dialog);
+        TextView message = new TextView(this);
+        message.setText("Only this shelf will be deleted. The books inside it will stay safely in your Library.");
+        message.setTextSize(12.5f);
+        message.setTextColor(themeSecondaryText());
+        message.setLineSpacing(dp(2), 1.12f);
+        message.setPadding(dp(12), dp(12), dp(12), dp(12));
+        message.setBackground(roundRect(themeControlSurface(), dp(15), dp(1), themeStroke()));
+        sheet.addView(message);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        TextView cancel = filterChoice("Cancel", false);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        TextView remove = filterChoice("Delete shelf", true);
+        remove.setTextColor(Color.WHITE);
+        remove.setBackground(roundRect(Color.rgb(205, 63, 63), dp(17), 0, 0));
+        remove.setOnClickListener(v -> {
+            if (LibraryShelfStore.deleteShelf(prefs, shelf)) {
+                if (shelf.equals(shelfFilter)) shelfFilter = "";
+                refreshLibrary();
+                maybeAutoGoogleSync();
+            }
+            dialog.dismiss();
+            showShelvesDialog();
+        });
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(dp(96), dp(40)); cancelLp.rightMargin = dp(8);
+        actions.addView(cancel, cancelLp);
+        actions.addView(remove, new LinearLayout.LayoutParams(dp(118), dp(40)));
+        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)); actionLp.topMargin = dp(10);
+        sheet.addView(actions, actionLp);
+        presentBottomSheet(dialog, sheet, 0.64f);
     }
 
     private View premiumChoiceRow(String titleText, String subtitleText, boolean selected, Runnable action) {
@@ -2637,7 +2830,7 @@ public class MainActivity extends Activity {
     private void loadBookVisual(File file,ImageView cover,TextView titleView,TextView metaView){
         new Thread(()->{ String title=stripExtension(file.getName()),author=cachedLibraryAuthor(file); Bitmap bitmap=null; try{ if(file.getName().toLowerCase(Locale.ROOT).endsWith(".epub")){ EpubUtil.Summary s=EpubUtil.extractSummary(file,coverCacheDir); if(s.title!=null&&!s.title.isEmpty()) title=s.title; if(s.author!=null&&!s.author.trim().isEmpty()) author=s.author.trim(); if(s.cover!=null&&s.cover.isFile()) bitmap=BitmapFactory.decodeFile(s.cover.getAbsolutePath()); } else bitmap=renderPdfCover(file); }catch(Exception ignored){}
             prefs.edit().putString("library_title_" + file.getName(), title).putString("library_author_" + file.getName(), author).apply();
-            String ft=title,fa=author; Bitmap fb=bitmap; int progress=prefs.getInt("percent_"+file.getName(),0); runOnUiThread(()->{ if(fb!=null) cover.setImageBitmap(fb); titleView.setText(ft); applyBookTitleTypeface(titleView); String type=file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB"; metaView.setText(fa.isEmpty()?type+" · "+progress+"%":fa+" · "+progress+"%"); if(!fa.isEmpty()){ if(pyidaungsuTypeface!=null) metaView.setTypeface(pyidaungsuTypeface); metaView.setClickable(true); metaView.setOnClickListener(v->{authorFilter=fa;refreshLibrary();}); } }); }).start();
+            String ft=title,fa=author; Bitmap fb=bitmap; int progress=ReadingProgressStore.get(prefs, file.getName()); runOnUiThread(()->{ if(fb!=null) cover.setImageBitmap(fb); titleView.setText(ft); applyBookTitleTypeface(titleView); String type=file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")?"PDF":"EPUB"; metaView.setText(fa.isEmpty()?type+" · "+progress+"%":fa+" · "+progress+"%"); if(!fa.isEmpty()){ if(pyidaungsuTypeface!=null) metaView.setTypeface(pyidaungsuTypeface); metaView.setClickable(true); metaView.setOnClickListener(v->{authorFilter=fa;refreshLibrary();}); } }); }).start();
     }
 
     private Bitmap renderPdfCover(File file){ ParcelFileDescriptor pfd=null; PdfRenderer renderer=null; PdfRenderer.Page page=null; try{ pfd=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY); renderer=new PdfRenderer(pfd); if(renderer.getPageCount()==0)return null; page=renderer.openPage(0); int width=360,height=Math.max(1,Math.round(width*(page.getHeight()/(float)page.getWidth()))); Bitmap b=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888); b.eraseColor(Color.WHITE); page.render(b,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); return b; }catch(Exception e){return null;} finally{try{if(page!=null)page.close();}catch(Exception ignored){} try{if(renderer!=null)renderer.close();}catch(Exception ignored){} try{if(pfd!=null)pfd.close();}catch(Exception ignored){}} }
@@ -2710,7 +2903,7 @@ public class MainActivity extends Activity {
 
     private String queryDisplayName(Uri uri){ if("file".equalsIgnoreCase(uri.getScheme()))return new File(uri.getPath()).getName(); Cursor c=null; try{c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null);if(c!=null&&c.moveToFirst())return c.getString(0);}catch(Exception ignored){}finally{if(c!=null)c.close();}return null; }
     private File uniqueFile(String originalName){ String safe=originalName.replaceAll("[\\\\/:*?\"<>|]","_"); File f=new File(libraryDir,safe);if(!f.exists())return f;int dot=safe.lastIndexOf('.');String base=dot>0?safe.substring(0,dot):safe,ext=dot>0?safe.substring(dot):"";return new File(libraryDir,base+"_"+System.currentTimeMillis()+ext); }
-    private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out);}
+    private void openBook(File file){prefs.edit().putLong("last_opened_"+file.getName(),System.currentTimeMillis()).apply();readerUiRefreshPending=true;Intent i=new Intent(this,BookReaderActivity.class);i.putExtra("path",file.getAbsolutePath());startActivity(i);overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out);}
     private void confirmDelete(File file) {
         android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
