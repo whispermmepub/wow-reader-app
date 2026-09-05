@@ -1,4 +1,4 @@
-name: Build signed WoW Reader production release
+name: Build signed WoW Reader v2.17.2 production release
 
 on:
   workflow_dispatch:
@@ -16,6 +16,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify production version
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
+          grep -q "versionCode 42" app/build.gradle
+          grep -q "versionName '2.17.2'" app/build.gradle
+          test -s app/src/main/java/com/whisper/wowreader/ReadingCalendarActivity.java
+          test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -48,7 +58,7 @@ jobs:
           chmod 600 "$WOW_RELEASE_STORE_FILE"
           echo "WOW_RELEASE_STORE_FILE=$WOW_RELEASE_STORE_FILE" >> "$GITHUB_ENV"
 
-      - name: Build, lint and sign
+      - name: Build lint and sign
         run: gradle :app:clean :app:assembleRelease :app:bundleRelease :app:lintRelease --stacktrace
 
       - name: Verify production signatures
@@ -60,6 +70,9 @@ jobs:
           test -s "$APK"
           test -s "$AAB"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
+          "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='42'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.2'"
           "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
@@ -70,15 +83,15 @@ jobs:
       - name: Collect signed release
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.14.0-production.apk
-          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.14.0-production.aab
+          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.17.2-v42-production.apk
+          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.2-v42-production.aab
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.14.0-production
+          name: WoW-Reader-v2.17.2-v42-production
           path: |
-            WoW-Reader-v2.14.0-production.apk
-            WoW-Reader-v2.14.0-production.aab
+            WoW-Reader-v2.17.2-v42-production.apk
+            WoW-Reader-v2.17.2-v42-production.aab
           if-no-files-found: error
           retention-days: 14
