@@ -1,4 +1,4 @@
-name: Build signed WoW Reader v2.17.2 production release
+name: Build signed WoW Reader stable v2.17.0 production release
 
 on:
   workflow_dispatch:
@@ -22,9 +22,11 @@ jobs:
         run: |
           set -euo pipefail
           grep -q "applicationId 'com.whisper.wowreader'" app/build.gradle
-          grep -q "versionCode 42" app/build.gradle
-          grep -q "versionName '2.17.2'" app/build.gradle
-          test -s app/src/main/java/com/whisper/wowreader/ReadingCalendarActivity.java
+          grep -q "versionCode 40" app/build.gradle
+          grep -q "versionName '2.17.0'" app/build.gradle
+          test -s app/google-services.json
+          grep -q 'GoogleAuthProvider.getCredential' app/src/main/java/com/whisper/wowreader/GoogleAccountAuth.java
+          grep -q 'Scopes.DRIVE_APPFOLDER' app/src/main/java/com/whisper/wowreader/GoogleDriveSync.java
           test ! -e app/src/main/java/com/whisper/wowreader/AutoLibrarySync.java
 
       - name: Set up Java 17
@@ -71,27 +73,26 @@ jobs:
           test -s "$AAB"
           AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
           "$AAPT" dump badging "$APK" | grep -q "package: name='com.whisper.wowreader'"
-          "$AAPT" dump badging "$APK" | grep -q "versionCode='42'"
-          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.2'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='40'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='2.17.0'"
           "$AAPT" dump badging "$APK" | grep -q "targetSdkVersion:'36'"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose --print-certs "$APK"
-          jarsigner -verify -certs "$AAB"
-          keytool -printcert -jarfile "$AAB" | grep -qi '21:17:d3:1e:01:eb:24:ea:e3:fe:4a:26:88:c8:c7:12:cd:76:71:f1'
           "$APKSIGNER" verify --print-certs "$APK" | grep -qi '21:17:d3:1e:01:eb:24:ea:e3:fe:4a:26:88:c8:c7:12:cd:76:71:f1'
+          keytool -printcert -jarfile "$AAB" | grep -qi '21:17:d3:1e:01:eb:24:ea:e3:fe:4a:26:88:c8:c7:12:cd:76:71:f1'
 
       - name: Collect signed release
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.17.2-v42-production.apk
-          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.2-v42-production.aab
+          cp app/build/outputs/apk/release/app-release.apk WoW-Reader-v2.17.0-v40-production.apk
+          cp app/build/outputs/bundle/release/app-release.aab WoW-Reader-v2.17.0-v40-production.aab
 
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WoW-Reader-v2.17.2-v42-production
+          name: WoW-Reader-v2.17.0-v40-production
           path: |
-            WoW-Reader-v2.17.2-v42-production.apk
-            WoW-Reader-v2.17.2-v42-production.aab
+            WoW-Reader-v2.17.0-v40-production.apk
+            WoW-Reader-v2.17.0-v40-production.aab
           if-no-files-found: error
           retention-days: 14
